@@ -747,7 +747,7 @@ class Ui_MainWindow_Wart(object):
 "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-size:16px;\">r</span></p></body></html>", None))
         self.label_15.setText(QCoreApplication.translate("MainWindow", u"Your wallet:", None))
         self.copy_btn.setText("")
-        self.fee_text.setText(QCoreApplication.translate("MainWindow", u"0.00000001", None))
+        self.fee_text.setText(QCoreApplication.translate("MainWindow", u"0.001000100", None))
         self.send_btn.setText(QCoreApplication.translate("MainWindow", u"Send", None))
         self.label_6.setText(QCoreApplication.translate("MainWindow", u"Fee:", None))
         self.label_4.setText(QCoreApplication.translate("MainWindow", u"Enter recipient address:", None))
@@ -772,4 +772,5 @@ class Ui_MainWindow_Wart(object):
         self.label_7.setText(QCoreApplication.translate("MainWindow", u".", None))
         self.balance.setText("")
     # retranslateUi
+
 
