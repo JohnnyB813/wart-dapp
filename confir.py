@@ -16,7 +16,7 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QDialog, QFrame, QHBoxLayout,
-    QLabel, QPushButton, QSizePolicy, QTextEdit,
+    QLabel, QPushButton, QSizePolicy, QLineEdit,
     QWidget)
 import res_rc
 
@@ -115,7 +115,8 @@ class Ui_Confirm(object):
         self.label_2.setStyleSheet(u"color:white;")
         self.label_2.setAlignment(Qt.AlignLeading|Qt.AlignLeft|Qt.AlignTop)
         self.label_2.setWordWrap(True)
-        self.textEdit = QTextEdit(self.frame)
+        self.textEdit = QLineEdit(self.frame)
+        self.textEdit.setEchoMode(QLineEdit.EchoMode.Password)
         self.textEdit.setObjectName(u"textEdit")
         self.textEdit.setGeometry(QRect(140, 130, 191, 31))
         font2 = QFont()

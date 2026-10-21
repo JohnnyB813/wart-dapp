@@ -943,7 +943,7 @@ border: 2px solid rgba(255,255,255,40);
 background-color: rgba(200,200,255,40);</string>
                </property>
                <property name="text">
-                <string>0.00000001</string>
+                <string>0.00100032</string>
                </property>
                <property name="maxLength">
                 <number>256</number>

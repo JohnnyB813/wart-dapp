@@ -1,4 +1,14 @@
 build/
+dist/
+.venv/
+*.pyc
 __pycache__
 wartwallet.db
+*.db
+*.db3
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.wartbackup
 .idea/

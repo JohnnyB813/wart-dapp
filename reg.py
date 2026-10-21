@@ -16,7 +16,7 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QDialog, QFrame, QHBoxLayout,
-    QLabel, QPushButton, QSizePolicy, QTextEdit,
+    QLabel, QPushButton, QSizePolicy, QLineEdit,
     QWidget)
 import res_rc
 
@@ -122,7 +122,8 @@ class Ui_Reg(object):
         self.label_4.setStyleSheet(u"color:white;")
         self.label_4.setAlignment(Qt.AlignRight|Qt.AlignTop|Qt.AlignTrailing)
         self.label_4.setWordWrap(True)
-        self.textEdit = QTextEdit(self.frame)
+        self.textEdit = QLineEdit(self.frame)
+        self.textEdit.setEchoMode(QLineEdit.EchoMode.Password)
         self.textEdit.setObjectName(u"textEdit")
         self.textEdit.setGeometry(QRect(140, 80, 191, 31))
         font2 = QFont()
@@ -130,7 +131,8 @@ class Ui_Reg(object):
         font2.setPointSize(13)
         self.textEdit.setFont(font2)
         self.textEdit.setStyleSheet(u"color:white;")
-        self.textEdit_2 = QTextEdit(self.frame)
+        self.textEdit_2 = QLineEdit(self.frame)
+        self.textEdit_2.setEchoMode(QLineEdit.EchoMode.Password)
         self.textEdit_2.setObjectName(u"textEdit_2")
         self.textEdit_2.setGeometry(QRect(140, 160, 191, 31))
         self.textEdit_2.setFont(font2)

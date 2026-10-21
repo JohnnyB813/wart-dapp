@@ -1,7 +1,8 @@
 import base64
 import os
-import requests
-import json
+import re
+import secrets
+from dataclasses import dataclass
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -10,11 +11,82 @@ from ecdsa.util import randrange_from_seed__trytryagain
 from Cryptodome.Hash import RIPEMD160, SHA256
 from pycoin.ecdsa.secp256k1 import secp256k1_generator
 from hashlib import sha256
-from random import randint
+from node_client import NodeClient, NodeError
+
+COIN = 100000000
+MAX_UINT64 = (1 << 64) - 1
+
+
+def validate_password(password):
+    if not isinstance(password, str) or len(password) < 8:
+        raise ValueError('Use a password with at least eight characters.')
+
+
+def parse_e8(text, allow_zero=False):
+    """Parse exact decimal units without floating-point rounding or large allocations."""
+    if not isinstance(text, str) or len(text) > 64:
+        raise ValueError('Enter a valid WART amount.')
+    text = text.strip()
+    if not re.fullmatch(r'(?:[0-9]{1,12}(?:\.[0-9]*)?|\.[0-9]+)', text):
+        raise ValueError('Enter a non-negative decimal WART amount.')
+    whole, _, fraction = text.partition('.')
+    fraction = fraction.rstrip('0')
+    if len(fraction) > 8:
+        raise ValueError('WART amounts support at most eight decimal places.')
+    value = int(whole or '0') * COIN + int(fraction.ljust(8, '0') or '0')
+    if value > MAX_UINT64 or (not allow_zero and value == 0):
+        raise ValueError('Amount is outside the supported range.')
+    return value
+
+
+def format_e8(value):
+    return f'{value // COIN}.{value % COIN:08d}'
+
+
+def round_fee_e8(value):
+    """Legacy CompactUInt::compact/uncompact, rounding down like the reference node.
+
+    https://github.com/warthog-network/core/blob/0.8.20/src/shared/src/general/compact_uint.cpp
+    Fees have an 11-bit significand. No node response supplies spending authority.
+    """
+    if type(value) is not int or not 0 <= value <= MAX_UINT64:
+        raise ValueError('Fee is outside the supported range.')
+    shift = max(0, value.bit_length() - 11)
+    return (value >> shift) << shift
+
+
+def validate_address(address):
+    if not isinstance(address, str) or not re.fullmatch(r'[a-fA-F0-9]{48}', address):
+        raise ValueError('Invalid recipient address.')
+    raw = bytes.fromhex(address)
+    if sha256(raw[:20]).digest()[:4] != raw[20:]:
+        raise ValueError('Recipient address checksum is invalid.')
+    return address.lower()
+
+
+@dataclass(frozen=True)
+class TransferIntent:
+    recipient: str
+    amount: int
+    fee: int
+
+    def __post_init__(self):
+        object.__setattr__(self, 'recipient', validate_address(self.recipient))
+        if type(self.amount) is not int or not 0 < self.amount <= MAX_UINT64:
+            raise ValueError('Amount is outside the supported range.')
+        if round_fee_e8(self.fee) != self.fee:
+            raise ValueError('Fee must be locally rounded before confirmation.')
+        if self.amount + self.fee > MAX_UINT64:
+            raise ValueError('Amount plus fee is outside the supported range.')
+
+    @classmethod
+    def from_text(cls, recipient, amount, fee):
+        return cls(recipient.strip(), parse_e8(amount), round_fee_e8(parse_e8(fee, allow_zero=True)))
 
 
 # encrypt private key
 def encrypt_pk(pk, pw):
+    validate_password(pw)
     salt = os.urandom(16)
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
@@ -62,6 +134,27 @@ def wallet_from_pkhex(pkhex):
     return address_from_pk(pk), pk
 
 
+class WalletPasswordError(ValueError):
+    pass
+
+
+def unlock_wallet(record, password):
+    if record is None:
+        raise WalletPasswordError('Wallet record is missing.')
+    try:
+        private_key = decrypt_pk(record[2], password, record[3])
+        if private_key is None:
+            raise WalletPasswordError('Invalid wallet password.')
+        address, key = wallet_from_pkhex(private_key)
+        if address != validate_address(record[1]):
+            raise WalletPasswordError('The wallet key does not match its saved address.')
+        return address, key
+    except (TypeError, ValueError) as exc:
+        if isinstance(exc, WalletPasswordError):
+            raise
+        raise WalletPasswordError('Could not unlock this wallet record.') from exc
+
+
 def address_from_pk(pk):
     pubkey = pk.get_verifying_key().to_string('compressed')
 
@@ -78,23 +171,27 @@ def address_from_pk(pk):
     return addr.hex()
 
 
-def send_tx(recipient, amount, fee, pk, peer):
+@dataclass(frozen=True)
+class SignedTransfer:
+    tx_hash: str
+    payload: dict
+
+
+def prepare_tx(recipient, amount, fee, pk, peer, cancel=None, network='mainnet'):
+    # Enforce the same immutable values that were displayed for confirmation.
+    intent = TransferIntent(recipient, amount, fee)
+    client = NodeClient(peer, cancel=cancel, network=network)
     # get pinHash and pinHeight from warthog node
-    head_raw = requests.get(peer + '/chain/head').content
-    head = json.loads(head_raw)
-    pinHash = head["data"]["pinHash"]
-    pinHeight = head["data"]["pinHeight"]
+    head = client.head(require_synced=True)
+    client.require_network()
+    pinHash = head['pinHash']
+    pinHeight = head['pinHeight']
 
     # send parameters
-    nonceId = randint(0, 4294967295)  # 32 bit number, unique per pinHash and pinHeight
-    toAddr = recipient
-    amountE8 = amount  # 1 WART, this must be an integer, coin amount * 10E8
-
-    # alternative: round fee from E8 amount
-    rawFeeE8 = str(fee)  # this needs to be rounded
-    result = requests.get(peer + '/tools/encode16bit/from_e8/' + rawFeeE8).content
-    encode16bit_result = json.loads(result)
-    feeE8 = encode16bit_result["data"]["roundedE8"]  # 9992
+    nonceId = secrets.randbits(32)  # public transaction ID, not the ECDSA nonce
+    toAddr = intent.recipient
+    amountE8 = intent.amount
+    feeE8 = intent.fee
 
     # generate bytes to sign
     to_sign = \
@@ -109,6 +206,7 @@ def send_tx(recipient, amount, fee, pk, peer):
     # create signature
     private_key = pk.privkey.secret_multiplier
     digest = sha256(to_sign).digest()
+    client.check_cancelled()
 
     # sign with recovery id
     (r, s, rec_id) = secp256k1_generator.sign_with_recid(private_key, int.from_bytes(digest, 'big'))
@@ -129,23 +227,18 @@ def send_tx(recipient, amount, fee, pk, peer):
         "feeE8": feeE8,
         "signature65": signature65.hex()
     }
-    rep = requests.post(peer + "/transaction/add", json=postdata)
-    return rep.json()
+    if network == 'testnet':
+        postdata['type'] = 'wartTransfer'
+        postdata['wartE8'] = postdata.pop('amountE8')
+    client.check_cancelled()
+    return SignedTransfer(digest.hex(), postdata)
 
 
-# redirect to /auth/<token>
-def set_token(window):
-    r = window.evaluate_js('window.location.replace("http://localhost:50050/auth/" + window.pywebview.token.toString());')
+def send_tx(recipient, amount, fee, pk, peer, cancel=None, network='mainnet'):
+    prepared = prepare_tx(recipient, amount, fee, pk, peer, cancel, network)
+    return NodeClient(peer, cancel=cancel, network=network).broadcast(prepared.payload)
 
 
 # get balance for address
-def get_balance(peer, addr):
-    try:
-        r = requests.get(f"{peer}/account/{addr}/balance")
-        data = r.json()
-        if data["code"] == 0:
-            return data["data"]["balance"]
-        else:
-            return 0
-    except requests.exceptions.RequestException:
-        return None
+def get_balance(peer, addr, cancel=None, network='mainnet'):
+    return NodeClient(peer, cancel=cancel, network=network).balance(validate_address(addr))

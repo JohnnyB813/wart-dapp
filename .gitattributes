@@ -1,0 +1,6 @@
+# Existing source files contain committed CRLF; avoid whole-file EOL conversions.
+*.py -text whitespace=cr-at-eol
+*.ui -text whitespace=cr-at-eol
+*.spec -text whitespace=cr-at-eol
+*.md -text whitespace=cr-at-eol
+.gitignore -text whitespace=cr-at-eol

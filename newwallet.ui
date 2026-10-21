@@ -266,7 +266,10 @@ background-color: rgba(255,255,255,60);
      <bool>true</bool>
     </property>
    </widget>
-   <widget class="QTextEdit" name="textEdit">
+   <widget class="QLineEdit" name="textEdit">
+    <property name="echoMode">
+     <enum>QLineEdit::Password</enum>
+    </property>
     <property name="geometry">
      <rect>
       <x>140</x>
@@ -285,7 +288,10 @@ background-color: rgba(255,255,255,60);
      <string notr="true">color:white;</string>
     </property>
    </widget>
-   <widget class="QTextEdit" name="textEdit_2">
+   <widget class="QLineEdit" name="textEdit_2">
+    <property name="echoMode">
+     <enum>QLineEdit::Password</enum>
+    </property>
     <property name="geometry">
      <rect>
       <x>140</x>
