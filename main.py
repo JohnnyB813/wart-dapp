@@ -8,19 +8,15 @@ from PySide6.QtCore import Qt, QTimer, QEvent
 from PySide6.QtWidgets import QApplication, QMainWindow, QDialog, QMessageBox
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QLineEdit, QToolBar
 from PySide6.QtWidgets import QFormLayout, QDialogButtonBox, QLabel
-from PySide6.QtWidgets import QComboBox, QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser, QPushButton
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser, QPushButton
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from mnemonic import Mnemonic
 
-from entry_screen import Ui_MainWindow
-from wallets_select import Ui_WalletsWindow
-from addmnemo import Ui_Dialog_Mnemo
-from addprivkey import Ui_Dialog_Priv
+from connection_ui import ConnectionPanel
+from wallets_ui import WalletsPanel
 from mainwindow import Ui_MainWindow_Wart
-from confir import Ui_Confirm
-from reg import Ui_Reg
-from mnemon import Ui_Dialog
+from dialogs_ui import password_controls, recovery_controls, phrase_controls
 from db import DB
 from app_paths import prepare_wallet_path, default_wallet_path, MigrationChoiceRequired, copy_database, read_database_snapshot
 from app_info import VERSION, BUILD_LABEL, release_notes
@@ -36,7 +32,7 @@ from mined_ui import MinedBlocksPanel
 from payments_ui import SendPanel, ReceivePanel, address_qr
 from contacts_ui import ContactsPanel
 from bundled_nodes import PUBLIC_NODES, TESTNET_NODES
-from PySide6.QtGui import QPixmap, QFont
+from PySide6.QtGui import QPixmap, QFont, QIcon
 from gui_jobs import GuiJobs
 from node_client import NodeClient, NodeError, BroadcastUncertain
 from utils import (TransferIntent, encrypt_pk, format_e8, get_balance,
@@ -55,6 +51,7 @@ def network_label(network):
 
 def message(parent, text, title='Warthog Network'):
     box = QMessageBox(parent)
+    box.setStyleSheet(PANEL_STYLE + 'QMessageBox { background: #16191d; }')
     box.setWindowTitle(title)
     box.setTextFormat(Qt.TextFormat.PlainText)
     box.setText(str(text))
@@ -64,9 +61,7 @@ def message(parent, text, title='Warthog Network'):
 class Register(QDialog):
     def __init__(self, parent):
         super().__init__(parent)
-        self.register = Ui_Reg()
-        self.register.setupUi(self)
-        hide_unused_header(self.register)
+        self.register = password_controls(self, confirmation=True)
         self._password = None
         self.register.ok_btn.clicked.connect(self.ok)
 
@@ -100,9 +95,7 @@ class Register(QDialog):
 class Login(QDialog):
     def __init__(self, parent, addr):
         super().__init__(parent)
-        self.login = Ui_Confirm()
-        self.login.setupUi(self)
-        hide_unused_header(self.login)
+        self.login = password_controls(self)
         self.addr = addr
         self.login.ok_btn.clicked.connect(self.ok)
         self.finished.connect(lambda result: self.login.textEdit.clear())
@@ -263,6 +256,9 @@ class MainWindow(QMainWindow):
         self.mainUI = Ui_MainWindow_Wart()
         self.mainUI.setupUi(self)
         hide_unused_header(self.mainUI)
+        self.setMaximumSize(16777215, 16777215)
+        self.setMinimumHeight(680)
+        self.mainUI.stackedWidget.setFont(QFont('Segoe UI', 10))
         self.mainUI.balance.setFont(QFont('Segoe UI', 11))
         self.mainUI.label_2.setFont(QFont('Segoe UI', 11))
         # Replace the fixed page rectangle with a layout below the balance row.
@@ -337,6 +333,7 @@ class MainWindow(QMainWindow):
         self.mainUI.pushButton_4.clicked.connect(self.showMinimized)
         self.mainUI.send_btn.clicked.connect(self.send_wart)
         self.mainUI.add_bttn.clicked.connect(self.add_friend)
+        self.contacts_panel.remove.clicked.connect(self.remove_friend)
         self.mainUI.show_btn.clicked.connect(self.list_transactions)
         self.mainUI.copy_btn.clicked.connect(self.copy_to_clipboard)
         for button, url in [('discord_btn', 'https://discord.com/invite/QMDV8bGTdQ'),
@@ -546,6 +543,26 @@ class MainWindow(QMainWindow):
             message(self, exc)
             return
         db.insert_friend(recipient, name)
+        self.get_friends()
+
+    def remove_friend(self):
+        contact = self.contacts_panel.selected_contact()
+        if contact is None:
+            return
+        prompt = QMessageBox(self)
+        prompt.setStyleSheet(PANEL_STYLE + 'QMessageBox { background: #16191d; }')
+        prompt.setWindowTitle('Remove contact')
+        prompt.setTextFormat(Qt.TextFormat.PlainText)
+        prompt.setText(f'Remove {contact["name"]} from Address Book?\n\n{contact["address"]}')
+        prompt.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        prompt.setDefaultButton(QMessageBox.StandardButton.No)
+        if prompt.exec() != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            db.delete_friend(contact['id'])
+        except sqlite3.Error as exc:
+            message(self, 'Could not remove this contact. ' + str(exc))
+            return
         self.get_friends()
 
     def copy_to_clipboard(self):
@@ -811,9 +828,7 @@ class MainWindow(QMainWindow):
 class PrivkeyRestore(QDialog):
     def __init__(self, parent, password):
         super().__init__(parent)
-        self.key = Ui_Dialog_Priv()
-        self.key.setupUi(self)
-        hide_unused_header(self.key)
+        self.key = recovery_controls(self, private_key=True)
         self.password = password
         self.key.ok_btn.clicked.connect(self.ok)
 
@@ -838,9 +853,7 @@ class PrivkeyRestore(QDialog):
 class MnemoRestore(QDialog):
     def __init__(self, parent, password):
         super().__init__(parent)
-        self.addmnemo = Ui_Dialog_Mnemo()
-        self.addmnemo.setupUi(self)
-        hide_unused_header(self.addmnemo)
+        self.addmnemo = recovery_controls(self)
         self.password = password
         self.addmnemo.ok_btn.clicked.connect(self.okay_btn)
 
@@ -873,9 +886,7 @@ class MnemoRestore(QDialog):
 class Mnemon(QDialog):
     def __init__(self, words, parent):
         super().__init__(parent)
-        self.mnemon = Ui_Dialog()
-        self.mnemon.setupUi(self)
-        hide_unused_header(self.mnemon)
+        self.mnemon = phrase_controls(self)
         self.mnemon.mnemo_label.setText(words)
         self.mnemon.ok_btn.clicked.connect(self.accept)
         self.finished.connect(lambda result: self.mnemon.mnemo_label.clear())
@@ -884,10 +895,11 @@ class Mnemon(QDialog):
 class WartWallets(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.wallets = Ui_WalletsWindow()
-        self.wallets.setupUi(self)
-        hide_unused_header(self.wallets)
-        self.wallets.listWidget.setFont(QFont('Segoe UI', 12))
+        self.wallets = WalletsPanel()
+        self.setCentralWidget(self.wallets)
+        self.setMinimumSize(700, 480)
+        self.resize(800, 560)
+        self.setWindowIcon(QIcon(':/icon/icons/icon.ico'))
         self.setWindowTitle(f'Warthog Wallet {VERSION} — Wallets')
         self.backup_jobs = GuiJobs(self)
         toolbar = QToolBar('Wallet backups', self)
@@ -994,6 +1006,9 @@ class WartWallets(QMainWindow):
         self.wallets.listWidget.clear()
         for wallet in db.get_wallets():
             self.wallets.listWidget.addItem(wallet[1])
+            self.wallets.listWidget.item(self.wallets.listWidget.count() - 1).setToolTip(wallet[1])
+        self.wallets.notice.setText('Select an address to unlock its wallet.' if self.wallets.listWidget.count()
+                                  else 'No saved wallets yet. Create a wallet or add an existing one above.')
 
     def register_password(self):
         dialog = Register(self)
@@ -1040,42 +1055,26 @@ class WartWallets(QMainWindow):
 class WartEntry(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.ui = Ui_MainWindow()
-        self.ui.setupUi(self)
-        hide_unused_header(self.ui)
-        self.ui.input_field.setFont(QFont('Segoe UI', 11))
-        self.ui.input_field.setStyleSheet(
-            'QLineEdit { font-size: 14px; color: #eeeeee; background: #1b1e22; '
-            'border: 1px solid #45494e; border-radius: 8px; padding: 8px; }')
+        self.ui = ConnectionPanel()
+        self.setCentralWidget(self.ui)
+        self.setMinimumSize(700, 520)
+        self.resize(800, 560)
+        self.setWindowIcon(QIcon(':/icon/icons/icon.ico'))
         self.setWindowTitle(f'Warthog Wallet {VERSION} — Connect to a network')
         self.jobs = GuiJobs(self)
-        toolbar = QToolBar('Saved nodes', self)
-        self.node_toolbar = toolbar
-        toolbar.setStyleSheet(TOOLBAR_STYLE)
-        toolbar.setMovable(False)
-        self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, toolbar)
-        toolbar.addWidget(QLabel('Network: '))
-        self.network = QComboBox()
-        self.network.setMinimumWidth(135)
-        self.network.addItem('Mainnet', 'mainnet')
-        self.network.addItem('DeFi testnet', 'testnet')
+        self.network = self.ui.network
         self.network.setCurrentIndex(max(0, self.network.findData(db.setting('selected_network', 'mainnet'))))
-        toolbar.addWidget(self.network)
-        toolbar.addWidget(QLabel(' Node: '))
-        self.profiles = QComboBox()
-        self.profiles.setMinimumWidth(220)
-        toolbar.addWidget(self.profiles)
-        toolbar.addAction('Save profile', self.save_profile)
-        toolbar.addAction('Delete profile', self.delete_profile)
-        toolbar.addAction('Settings', self.open_settings)
-        self.network_hint = QLabel()
-        self.network_hint.setWordWrap(True)
-        toolbar.addWidget(self.network_hint)
+        self.profiles = self.ui.profiles
+        self.ui.save_profile.clicked.connect(self.save_profile)
+        self.ui.delete_profile.clicked.connect(self.delete_profile)
+        self.ui.settings.clicked.connect(self.open_settings)
+        self.network_hint = self.ui.network_hint
         self.profiles.currentIndexChanged.connect(self.choose_profile)
         self.network.currentIndexChanged.connect(self.change_network)
         self.load_profiles()
         self.ui.public_button.clicked.connect(self.public_connect)
         self.ui.connect_button.clicked.connect(self.private_connect)
+        self.ui.input_field.returnPressed.connect(self.private_connect)
 
     def load_profiles(self, selected=None):
         network = self.network.currentData()
@@ -1155,8 +1154,7 @@ class WartEntry(QMainWindow):
         self.network.setEnabled(not busy)
         self.profiles.setEnabled(not busy)
         self.ui.input_field.setEnabled(not busy)
-        for action in self.node_toolbar.actions():
-            action.setEnabled(not busy)
+        self.ui.profile_actions.setEnabled(not busy)
 
     def connected(self, state):
         global PEER

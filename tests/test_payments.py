@@ -23,6 +23,22 @@ OTHER = utils.wallet_from_pkhex('00' * 31 + '02')[0]
 
 
 class PaymentTests(unittest.TestCase):
+    def test_removing_one_contact_persists_without_removing_other_entries_for_same_address(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'wallet.db'
+            store = DB(path)
+            try:
+                store.insert_friend(OTHER, 'First entry')
+                store.insert_friend(OTHER, 'Second entry')
+                store.delete_friend(store.get_friends()[0][0])
+            finally:
+                store.con.close()
+            reopened = DB(path)
+            try:
+                self.assertEqual([(row[1], row[2]) for row in reopened.get_friends()], [(OTHER, 'Second entry')])
+            finally:
+                reopened.con.close()
+
     def test_qr_decodes_to_exact_receiving_address_with_independent_decoder(self):
         image = address_qr(OWNER)
         with tempfile.TemporaryDirectory() as directory:
@@ -114,6 +130,29 @@ class PaymentGuiTests(unittest.TestCase):
         self.window.mainUI.addr_text_3.setText('invalid')
         self.window.add_friend()
         self.assertEqual(len(main.db.get_friends()), 1)
+
+    def test_remove_contact_requires_selection_and_confirmation_and_refreshes_send_contacts(self):
+        main.db.insert_friend(OTHER, 'First entry')
+        main.db.insert_friend(OTHER, 'Second entry')
+        self.window.get_friends()
+        panel = self.window.contacts_panel
+        with patch.object(main.QMessageBox, 'exec') as prompt:
+            self.window.remove_friend()
+            prompt.assert_not_called()
+        self.assertFalse(panel.remove.isEnabled())
+        panel.table.selectRow(0)
+        self.assertTrue(panel.remove.isEnabled())
+        with patch.object(main.QMessageBox, 'exec', return_value=main.QMessageBox.StandardButton.No):
+            panel.remove.click()
+        self.assertEqual(panel.table.rowCount(), 2)
+        with patch.object(main.QMessageBox, 'exec', return_value=main.QMessageBox.StandardButton.Yes):
+            panel.remove.click()
+        self.assertEqual([(row[1], row[2]) for row in main.db.get_friends()], [(OTHER, 'Second entry')])
+        self.assertEqual(panel.table.rowCount(), 1)
+        self.assertEqual(panel.table.item(0, 0).text(), 'Second entry')
+        self.assertEqual(self.window.send_panel.contacts.count(), 2)
+        self.assertIn('Second entry', self.window.send_panel.contacts.itemText(1))
+        self.assertFalse(panel.remove.isEnabled())
 
     def test_insufficient_or_stale_balance_never_opens_confirmation(self):
         self.ready_balance(100)

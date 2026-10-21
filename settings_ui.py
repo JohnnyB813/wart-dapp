@@ -279,6 +279,7 @@ class SettingsDialog(QDialog):
     def __init__(self, store, parent=None):
         super().__init__(parent)
         self.setWindowTitle('Wallet settings')
+        self.setStyleSheet(PANEL_STYLE + 'QDialog { background: #16191d; }')
         self.resize(760, 650)
         layout = QVBoxLayout(self)
         self.page = SettingsPage(store)

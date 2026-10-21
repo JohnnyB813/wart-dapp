@@ -29,6 +29,15 @@ Build: {BUILD_LABEL}
 Built: {BUILD_INFO['built_at']}
 
 New in {VERSION}
+• Compact password, private-key import, recovery-phrase and connection screens.
+• Remove a selected Address Book contact and immediately update the Send contact list.
+• Consistent settings-dialog controls and a resizable wallet workspace.
+
+In 1.4.2
+• Compact, resizable wallet selection screen with matching fonts and controls.
+• Full receiving addresses fit in the wallet list without oversized text.
+
+In 1.4.1
 • Compact address book with matching controls, separate name/address columns and address copying.
 • Six bundled node profiles: localhost and two public endpoints for each network.
 • Existing custom profiles, node order and disabled flags are preserved during upgrade.

@@ -1,4 +1,5 @@
 """Address book controls using the same sizing and theme as the payment pages."""
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QFormLayout, QHBoxLayout, QLabel,
                                QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
                                QAbstractItemView, QHeaderView, QApplication)
@@ -45,9 +46,12 @@ class ContactsPanel(QWidget):
         self.copy = QPushButton('Copy address')
         self.copy.setEnabled(False)
         self.copy.clicked.connect(self.copy_address)
-        self.table.itemSelectionChanged.connect(lambda: self.copy.setEnabled(self.table.currentRow() >= 0))
+        self.remove = QPushButton('Remove contact')
+        self.remove.setEnabled(False)
+        self.table.itemSelectionChanged.connect(self.update_actions)
         bar.addWidget(self.copy)
         bar.addStretch()
+        bar.addWidget(self.remove)
         layout.addLayout(bar)
 
     def set_contacts(self, contacts):
@@ -56,13 +60,30 @@ class ContactsPanel(QWidget):
         self.table.clearSelection()
         self.table.setCurrentCell(-1, -1)
         self.copy.setEnabled(False)
-        for row, (_, address, name) in enumerate(contacts):
+        self.remove.setEnabled(False)
+        for row, (contact_id, address, name) in enumerate(contacts):
             for column, value in enumerate((name, address)):
                 item = QTableWidgetItem(value)
                 item.setToolTip(value)
+                item.setData(Qt.ItemDataRole.UserRole, contact_id)
                 self.table.setItem(row, column, item)
 
+    def selected_contact(self):
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            return None
+        row = rows[0].row()
+        name, address = self.table.item(row, 0), self.table.item(row, 1)
+        if name is None or address is None:
+            return None
+        return dict(id=name.data(Qt.ItemDataRole.UserRole), name=name.text(), address=address.text())
+
+    def update_actions(self):
+        selected = self.selected_contact() is not None
+        self.copy.setEnabled(selected)
+        self.remove.setEnabled(selected)
+
     def copy_address(self):
-        row = self.table.currentRow()
-        if row >= 0 and self.table.item(row, 1):
-            QApplication.clipboard().setText(self.table.item(row, 1).text())
+        contact = self.selected_contact()
+        if contact:
+            QApplication.clipboard().setText(contact['address'])

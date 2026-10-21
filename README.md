@@ -1,11 +1,11 @@
-# Warthog Wallet 1.4.1
+# Warthog Wallet 1.4.3
 
 A Windows desktop wallet for Warthog mainnet and native WART payments on the
 DeFi testnet. Private keys and signing stay on this computer.
 
 ## Run the Windows build
 
-Extract `dist/1.4.1/wart-dapp-1.4.1-windows-x64.zip`, then run:
+Extract `dist/1.4.3/wart-dapp-1.4.3-windows-x64.zip`, then run:
 
 - `Start-Wallet.cmd` for the normal wallet profile.
 - `Start-Test-Wallet.cmd` for a separate, persistent test profile.
@@ -13,6 +13,10 @@ Extract `dist/1.4.1/wart-dapp-1.4.1-windows-x64.zip`, then run:
 No Python installation is required to run the executable. This is an unsigned
 build. Automated checks use public synthetic keys and a loopback mock node;
 they never send real WART. No live-chain transfer has been certified.
+
+The wallet-selection window uses compact controls and a resizable layout. Select
+a saved address to unlock it, or create/add a wallet using the buttons above the list.
+Connection, password and wallet recovery dialogs use the same fonts and controls.
 
 Connect to your node using a base URL such as `http://192.168.1.50:3000`.
 HTTP works for localhost, RFC1918 private IPv4, IPv6 unique-local and link-local
@@ -110,7 +114,7 @@ already in your profile. The original file is left intact.
 An explicit override remains available, for example when testing a copy:
 
 ```powershell
-.\wart-dapp-1.4.1-windows-x64.exe --wallet-db C:\path\to\copied-wallet.db
+.\wart-dapp-1.4.3-windows-x64.exe --wallet-db C:\path\to\copied-wallet.db
 ```
 
 ## Backup and recovery
@@ -150,6 +154,8 @@ locally without a third-party service.
 Address Book uses the same compact controls as Send. Contacts appear in separate
 name and address columns; select one and choose **Copy address** to copy it in full.
 Saved contacts are also available from the Send page's contact selector.
+Select a contact and choose **Remove contact**, then confirm, to remove that entry
+from Address Book and the Send selector. Other saved entries remain available.
 
 ## Personal history
 

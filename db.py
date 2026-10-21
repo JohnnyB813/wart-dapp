@@ -98,6 +98,10 @@ class DB:
         with self.con:
             self.con.execute("INSERT INTO friends (address,friend) VALUES (?, ?)", (addr, friend))
 
+    def delete_friend(self, contact_id):
+        with self.con:
+            self.con.execute('DELETE FROM friends WHERE id=?', (contact_id,))
+
     def get_wallet_by_address(self, addr):
         with self.con:
             r = self.con.execute("SELECT * FROM wallets WHERE address=?", (addr,))

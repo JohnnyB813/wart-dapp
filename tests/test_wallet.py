@@ -254,6 +254,22 @@ class GuiTests(unittest.TestCase):
             field.paste()
             self.assertEqual(field.text(), 'legacy\npassword')
 
+    def test_recovery_dialog_preserves_exact_legacy_phrase_and_clears_after_import(self):
+        phrase = PHRASE + '\n'
+        expected = utils.wallet_from_seed(main.mnemo.to_seed(phrase, passphrase=''))[0]
+        dialog = main.MnemoRestore(self.wallets, 'legacy password')
+        self.widgets.append(dialog)
+        dialog.addmnemo.pk_label.setText(phrase)
+        with patch.object(main.QMessageBox, 'question', return_value=main.QMessageBox.StandardButton.Yes):
+            dialog.okay_btn()
+        self.assertEqual(dialog.result(), QDialog.DialogCode.Accepted)
+        record = main.db.get_wallet_by_address(expected)
+        self.assertIsNotNone(record)
+        key_hex = utils.decrypt_pk(record[2], 'legacy password', record[3])
+        self.assertEqual(utils.wallet_from_pkhex(key_hex)[0], expected)
+        self.assertEqual(dialog.addmnemo.pk_label.text(), '')
+        self.assertIsNone(dialog.password)
+
     def test_closed_dialogs_clear_password_and_recovery_phrase(self):
         login = main.Login(self.wallets, ADDRESS)
         phrase = main.Mnemon(PHRASE, self.wallets)
