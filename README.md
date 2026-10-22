@@ -3,16 +3,54 @@
 A Windows desktop wallet for Warthog mainnet and native WART payments on the
 DeFi testnet. Private keys and signing stay on this computer.
 
-## Run the Windows build
+## Build from source (recommended)
 
-Extract `dist/1.4.3/wart-dapp-1.4.3-windows-x64.zip`, then run:
+We recommend building the wallet yourself from source. The Windows build script
+installs pinned dependencies, runs the regression tests, and packages the wallet
+from your checkout.
 
-- `Start-Wallet.cmd` for the normal wallet profile.
-- `Start-Test-Wallet.cmd` for a separate, persistent test profile.
+Install Git and 64-bit Python first. The Windows build and CI are tested with
+**Python 3.14.6**. Run these commands in PowerShell:
 
-No Python installation is required to run the executable. This is an unsigned
-build. Automated checks use public synthetic keys and a loopback mock node;
-they never send real WART. No live-chain transfer has been certified.
+```powershell
+git clone https://github.com/JohnnyB813/wart-dapp.git
+cd wart-dapp
+py -3.14 -m venv .venv
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-windows.ps1
+```
+
+The script uses `requirements-windows.lock`, records revision/source metadata,
+checks the packaged executable, and creates an executable, ZIP and SHA-256
+manifest in `dist/<version>/`. These paths refer to files created by your local
+build. For version 1.4.3, start your built wallet with:
+
+```powershell
+.\dist\1.4.3\Start-Wallet.cmd
+```
+
+Use `Start-Test-Wallet.cmd` in that same folder for a separate, persistent test
+profile. You can also extract the locally built ZIP and use either launcher
+there. The packaged executable runs without a Python installation and is
+unsigned. Use `-OutputDirectory dist/custom` with the build script if an existing
+executable is still open.
+
+## Run directly from source
+
+To run the Python application without packaging an executable, clone the repo
+and create `.venv` as above, then install the runtime dependencies and launch:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe launcher.py
+```
+
+For the separate test storage profile:
+
+```powershell
+.\.venv\Scripts\python.exe launcher.py --test-profile
+```
+
+## Connect to a node
 
 The wallet-selection window uses compact controls and a resizable layout. Select
 a saved address to unlock it, or create/add a wallet using the buttons above the list.
@@ -90,7 +128,7 @@ history and pending-payment reservations are separate. Always check the network
 shown on Receive and in the payment confirmation. **Change node** locks the wallet
 before switching networks. Testnet coins have no mainnet value.
 
-The **test profile** launcher is a separate storage profile, independent of the
+The **test profile** is a separate storage profile, independent of the
 network selector. Either storage profile can connect to either network.
 
 ## Wallet data and old databases
@@ -114,7 +152,7 @@ already in your profile. The original file is left intact.
 An explicit override remains available, for example when testing a copy:
 
 ```powershell
-.\wart-dapp-1.4.3-windows-x64.exe --wallet-db C:\path\to\copied-wallet.db
+.\.venv\Scripts\python.exe launcher.py --wallet-db C:\path\to\copied-wallet.db
 ```
 
 ## Backup and recovery
@@ -180,29 +218,21 @@ or mismatched replies stay uncertain. Refresh checks the saved ID; a not-found
 reply is not proof that a payment failed. Uncertain payments continue reserving
 their amount and fee. Nothing is automatically retried or re-signed.
 
-## Build and regression tests
+## Development and regression tests
 
-Use 64-bit Windows with Python 3.14.6:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
-```
-
-The script creates a local `.venv`, installs the pinned Windows dependency lock,
-runs all unit/integration tests, records revision/source metadata, packages the
-versioned executable, runs offline checks on the actual binary, then writes a
-ZIP and SHA-256 manifest. Output defaults to `dist/<version>/`. Use
-`-OutputDirectory dist/custom` when an existing executable is still open.
-
-Tests alone:
+The recommended build command runs the full test suite. To run tests separately,
+install the test dependencies in your virtual environment and run:
 
 ```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-test.txt
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
 Application dependencies are in `requirements.txt`; `requirements-test.txt`
 adds an independent QR decoder, and `requirements-build.txt` adds PyInstaller.
 Pillow and the QR decoder are test tools and are excluded from the executable.
+Automated checks use public synthetic keys and a loopback mock node; they never
+send real WART. No live-chain transfer has been certified.
 
 GitHub's Windows workflow runs the same build/test/package command for pull
 requests, main/master pushes, version tags and manual runs. Tags must match
