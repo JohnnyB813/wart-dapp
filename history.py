@@ -7,7 +7,7 @@ import re
 from hashlib import sha256
 from datetime import datetime, timezone
 
-from node_client import NodeError
+from node_client import NodeError, is_not_found_error
 from utils import validate_address, parse_e8
 
 LATEST_CURSOR = (1 << 63) - 1
@@ -88,7 +88,7 @@ def fetch_account_page(client, owner, before=LATEST_CURSOR, timestamps=None, hea
     try:
         data = client.request(f'/account/{owner}/history/{before}')
     except NodeError as exc:
-        if exc.code is not None and abs(exc.code) == 57:
+        if is_not_found_error(exc, client.expected_network):
             return [], 0
         raise
     blocks = data.get('perBlock')

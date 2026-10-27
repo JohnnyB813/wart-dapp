@@ -27,6 +27,12 @@ class BroadcastUncertain(NodeError):
     """The node may have accepted a transaction; do not automatically retry."""
 
 
+def is_not_found_error(error, network):
+    """Core assigns ENOTFOUND different numeric codes on the two networks."""
+    code = 56 if network == 'testnet' else 57
+    return error.code is not None and abs(error.code) == code
+
+
 class NodeClient:
     MAX_RESPONSE_BYTES = 1024 * 1024
 
@@ -290,7 +296,7 @@ class NodeClient:
         try:
             data = self.request('/transaction/lookup/' + tx_hash)
         except NodeError as exc:
-            if exc.code is not None and abs(exc.code) == 57:
+            if is_not_found_error(exc, self.expected_network):
                 return None
             raise
         if self.expected_network == 'testnet':

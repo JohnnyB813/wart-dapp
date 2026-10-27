@@ -103,6 +103,17 @@ class TestnetClientTests(unittest.TestCase):
                 with self.assertRaises(BroadcastUncertain):
                     client.broadcast({}, 'cd' * 32)
 
+    def test_defi_not_found_uses_code_56_not_mainnet_code_57(self):
+        client = NodeClient(PEER, network='testnet')
+        with patch.object(client, 'request', side_effect=NodeError('Not found', 56)):
+            self.assertIsNone(client.lookup('ab' * 32))
+            self.assertEqual(fetch_account_page(client, OWNER), ([], 0))
+        with patch.object(client, 'request', side_effect=NodeError('Empty response', 57)):
+            with self.assertRaisesRegex(NodeError, 'Empty response'):
+                client.lookup('ab' * 32)
+            with self.assertRaisesRegex(NodeError, 'Empty response'):
+                fetch_account_page(client, OWNER)
+
     def test_history_receive_send_rewards_and_lookup_reconciliation(self):
         client = NodeClient(PEER, network='testnet')
         tx = transaction()
@@ -213,6 +224,38 @@ class TestnetSessionGuiTests(unittest.TestCase):
         dialog.sent(signed.tx_hash)
         self.assertEqual(main.db.history(OWNER), [])
         self.assertEqual(main.db.history(OWNER, 'testnet')[0]['status'], 'pending')
+
+    def test_refresh_confirms_saved_payments_when_old_lookup_is_not_found(self):
+        main.db.network = 'testnet'
+        for tx_hash in ('aa' * 32, 'bb' * 32):
+            main.db.record_outgoing(OWNER, utils.TransferIntent(OTHER, 100000000, FEE),
+                                    utils.SignedTransfer(tx_hash, {}), main.PEER)
+            main.db.set_tx_status(OWNER, tx_hash, 'pending')
+        old = dict(main.db.history(OWNER)[0], tx_hash='cc' * 32, direction='mined',
+                   counterparty='', amount_e8='300000000', fee_e8='0', payload='',
+                   status='confirmed', confirmations=1, block_height=32)
+        main.db.save_history([old])
+
+        def response(_client, path):
+            if path.startswith('/account/'):
+                raise NodeError('Node rejected the request: Not found', 56)
+            if path.endswith('cc' * 32):
+                raise NodeError('Node rejected the request: Not found', 56)
+            if path.startswith('/transaction/lookup/'):
+                tx_hash = path.rsplit('/', 1)[-1]
+                return {'transaction': transaction(tx_hash=tx_hash), 'type': 'wartTransfer',
+                        'confirmations': 2, 'mined': {'block': {'height': 64}}}
+            if path == '/chain/block/64/header':
+                return {'header': HEADER}
+            raise AssertionError(path)
+
+        with patch.object(NodeClient, 'require_network'), patch.object(NodeClient, 'request', response):
+            self.window.list_transactions()
+            wait_for(lambda: not self.window.jobs.running('history'))
+        statuses = {row['tx_hash']: row['status'] for row in main.db.history(OWNER)}
+        self.assertEqual(statuses['aa' * 32], 'confirmed')
+        self.assertEqual(statuses['bb' * 32], 'confirmed')
+        self.assertEqual(main.db.reserved_amount(OWNER), 0)
 
 
 class TestnetGuiFlowTests(unittest.TestCase):

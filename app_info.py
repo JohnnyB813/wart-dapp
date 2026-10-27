@@ -29,6 +29,10 @@ Build: {BUILD_LABEL}
 Built: {BUILD_INFO['built_at']}
 
 New in {VERSION}
+• Fix DeFi testnet transaction refresh when the node returns its network-specific "Not found" code.
+• Validated saved payments can advance from Pending to Confirmed and release their balance reservations.
+
+In 1.4.3
 • Compact password, private-key import, recovery-phrase and connection screens.
 • Remove a selected Address Book contact and immediately update the Send contact list.
 • Consistent settings-dialog controls and a resizable wallet workspace.
