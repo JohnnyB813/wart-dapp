@@ -143,7 +143,9 @@ def reconcile_local(client, records, timestamps=None, headers=None):
         else:
             confirmations = integer(transaction.get('confirmations'), 'confirmation count')
             height = integer(transaction.get('blockHeight'), 'block height')
-            timestamp = block_timestamp(client, height, cache, headers) or record['timestamp']
+            reported_time = transaction.get('timestamp')
+            timestamp = (integer(reported_time, 'block timestamp') if reported_time is not None
+                         else block_timestamp(client, height, cache, headers)) or record['timestamp']
             changed = record_from_transaction(transaction, record['wallet_address'], height,
                                               confirmations, timestamp, client.peer,
                                               'testnet' if client.expected_network == 'testnet' else 'mainnet')

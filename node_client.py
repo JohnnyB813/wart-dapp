@@ -306,7 +306,8 @@ class NodeClient:
             if mined is not None and (not isinstance(mined, dict) or not isinstance(mined.get('block'), dict)):
                 raise NodeError('Invalid DeFi transaction block.')
             transaction.update(confirmations=data.get('confirmations'),
-                               blockHeight=mined['block'].get('height') if mined else 0)
+                               blockHeight=mined['block'].get('height') if mined else 0,
+                               timestamp=mined['block'].get('timestamp') if mined else None)
         else:
             transaction = data.get('transaction')
         if (not isinstance(transaction, dict) or not isinstance(transaction.get('txHash'), str)

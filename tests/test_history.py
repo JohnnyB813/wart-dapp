@@ -1,4 +1,5 @@
 import os
+from threading import Event
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -98,6 +99,22 @@ class HistoryTests(unittest.TestCase):
         finally:
             store.con.close()
 
+    def test_lookup_uses_reported_block_time_without_another_request(self):
+        store = DB(':memory:')
+        try:
+            store.record_outgoing(OWNER, TransferIntent(OTHER, 100000000, 1),
+                                  SignedTransfer('ab' * 32, {}), 'http://localhost:3000')
+            client = MagicMock(peer='http://localhost:3000', expected_network='mainnet')
+            client.lookup.return_value = dict(txHash='ab' * 32, fromAddress=OWNER,
+                                              toAddress=OTHER, amount='1.00000000',
+                                              fee='0.00000001', blockHeight=50,
+                                              confirmations=3, timestamp=1700000000)
+            row = reconcile_local(client, store.history(OWNER))[0]
+            self.assertEqual((row['status'], row['timestamp']), ('confirmed', 1700000000))
+            client.request.assert_not_called()
+        finally:
+            store.con.close()
+
     def test_lookup_not_found_and_mismatched_broadcast_id(self):
         client = NodeClient('http://localhost:3000')
         with patch.object(client, 'request', side_effect=NodeError('not found', -57)):
@@ -123,6 +140,60 @@ class JournalGuiTests(unittest.TestCase):
             lookup.assert_called_once_with('cd' * 32)
             history.assert_not_called()
         self.assertEqual(main.db.history(OWNER)[0]['status'], 'not_found')
+
+    def test_pending_status_is_saved_even_when_account_scan_times_out(self):
+        tx_hash = 'ee' * 32
+        main.db.record_outgoing(OWNER, TransferIntent(OTHER, 40000000000, 9992),
+                                SignedTransfer(tx_hash, {}), main.PEER)
+        main.db.set_tx_status(OWNER, tx_hash, 'pending')
+        old = dict(main.db.history(OWNER)[0], tx_hash='ff' * 32, direction='mined',
+                   counterparty='', amount_e8='150000000', fee_e8='0', payload='',
+                   status='confirmed', confirmations=100, block_height=40)
+        main.db.save_history([old])
+        transaction = dict(txHash=tx_hash, fromAddress=OWNER, toAddress=OTHER,
+                           amount='400.00000000', fee='0.00009992', blockHeight=50,
+                           confirmations=3, timestamp=1700000000)
+        with patch.object(main.NodeClient, 'require_network'), \
+             patch.object(main.NodeClient, 'lookup', return_value=transaction) as lookup, \
+             patch.object(main.NodeClient, 'request', side_effect=AssertionError('extra request')), \
+             patch.object(main, 'fetch_account_page', side_effect=NodeError('Node operation timed out.')) as history:
+            self.window.list_transactions()
+            wait_for(lambda: not self.window.jobs.running('history'))
+        lookup.assert_called_once_with(tx_hash)
+        history.assert_called_once()
+        self.assertEqual({row['tx_hash']: row['status'] for row in main.db.history(OWNER)}[tx_hash], 'confirmed')
+        self.assertEqual(main.db.reserved_amount(OWNER), 0)
+        self.assertIn('Saved payment statuses updated', self.window.history_panel.notice.text())
+
+    def test_selected_status_check_preempts_slow_account_scan(self):
+        tx_hash = 'ee' * 32
+        main.db.record_outgoing(OWNER, TransferIntent(OTHER, 100000000, 1),
+                                SignedTransfer(tx_hash, {}), main.PEER)
+        main.db.set_tx_status(OWNER, tx_hash, 'pending')
+        started, release = Event(), Event()
+
+        def slow_scan(*args):
+            started.set()
+            release.wait(5)
+            return [], 0
+
+        transaction = dict(txHash=tx_hash, fromAddress=OWNER, toAddress=OTHER,
+                           amount='1.00000000', fee='0.00000001', blockHeight=50,
+                           confirmations=3, timestamp=1700000000)
+        with patch.object(main.NodeClient, 'require_network'), \
+             patch.object(main.NodeClient, 'lookup', return_value=transaction) as lookup, \
+             patch.object(main, 'fetch_account_page', side_effect=slow_scan):
+            try:
+                self.window.refresh_history(LATEST_CURSOR, scan_only=True)
+                self.assertTrue(started.wait(2))
+                self.window.history_panel.table.selectRow(0)
+                self.window.check_selected_history()
+                wait_for(lambda: not self.window.jobs.running('history'))
+            finally:
+                release.set()
+                self.window.jobs.pool.waitForDone(6000)
+        lookup.assert_called_once_with(tx_hash)
+        self.assertEqual(main.db.history(OWNER)[0]['status'], 'confirmed')
     # Exercise the journal through the actual confirmation state machine.
     def test_journal_committed_before_post_and_uncertain_result_survives(self):
         dialog = self.confirm()

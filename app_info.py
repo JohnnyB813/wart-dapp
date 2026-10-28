@@ -29,6 +29,11 @@ Build: {BUILD_LABEL}
 Built: {BUILD_INFO['built_at']}
 
 New in {VERSION}
+• Check saved pending payments before loading the full account history.
+• Keep validated payment statuses when a separate account-history scan times out.
+• Let Check status interrupt a slow history scan; use node-provided payment dates when available.
+
+In 1.4.4
 • Fix DeFi testnet transaction refresh when the node returns its network-specific "Not found" code.
 • Validated saved payments can advance from Pending to Confirmed and release their balance reservations.
 

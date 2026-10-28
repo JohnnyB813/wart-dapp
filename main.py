@@ -663,27 +663,38 @@ class MainWindow(QMainWindow):
                 or any(row['status'] in ACTIVE_STATUSES for row in db.history(address))):
             self.list_transactions()
 
-    def refresh_history(self, cursor, selected=None):
-        if not address or not PEER or self.jobs.running('history'):
+    def refresh_history(self, cursor, selected=None, scan_only=False, checked_active=False, lookup_error=None):
+        if not address or not PEER:
             return
+        if self.jobs.running('history'):
+            if not selected:
+                return
+            # An explicit status check takes priority over a slow account scan.
+            self.jobs.cancel('history')
         peer, owner, network = PEER, address, db.network
         records = db.history(owner)
         self.history_panel.show_rows(records)
         timestamps = {}
-        # Recheck recent known transactions as well, including possible reorgs.
-        checking = [row for row in records if row['status'] in ACTIVE_STATUSES or row['status'] == 'confirmed'][:100]
         if selected:
             checking = [row for row in records if row['tx_hash'] == selected]
-        self.history_panel.notice.setText('Updating account payments and saved broadcasts…')
+            if not checking:
+                return
+        elif cursor == LATEST_CURSOR and not scan_only:
+            # Save active payment results before scanning account history, which can
+            # require a separate header request for each block on mainnet.
+            checking = [row for row in records if row['status'] in ACTIVE_STATUSES][:100]
+        else:
+            checking = []
+        self.history_panel.notice.setText('Checking saved payments…' if checking else 'Updating account payments…')
         self.history_panel.refresh.setEnabled(False)
         self.history_panel.older.setEnabled(False)
 
         def work(cancel):
             client = NodeClient(peer, cancel=cancel, deadline=time.monotonic() + 30, network=network)
             client.require_network()
-            rows, next_cursor = ([], cursor) if selected else fetch_account_page(client, owner, cursor, timestamps)
-            updates = reconcile_local(client, checking, timestamps)
-            return updates + rows, next_cursor
+            if checking:
+                return reconcile_local(client, checking, timestamps), cursor
+            return fetch_account_page(client, owner, cursor, timestamps)
 
         def success(result):
             if (PEER, address, db.network) != (peer, owner, network):
@@ -694,16 +705,31 @@ class MainWindow(QMainWindow):
             except (sqlite3.Error, ValueError) as exc:
                 failure(exc)
                 return
-            self.history_cursor = next_cursor
             self.history_panel.show_rows(db.history(owner))
-            self.history_panel.notice.setText('Updated from your node. Uncertain/not-found payments are never retried automatically.')
+            if checking and not selected:
+                self.refresh_history(cursor, scan_only=True, checked_active=True)
+                return
+            self.history_cursor = next_cursor
+            notice = 'Updated from your node. Uncertain/not-found payments are never retried automatically.'
+            if lookup_error:
+                notice += ' Direct status check failed: ' + lookup_error
+            self.history_panel.notice.setText(notice)
             self.history_panel.refresh.setEnabled(True)
             self.history_panel.older.setEnabled(bool(next_cursor))
 
         def failure(exc):
             if (PEER, address, db.network) != (peer, owner, network):
                 return
-            self.history_panel.notice.setText('Showing saved payments. Update failed: ' + str(exc))
+            if checking and not selected:
+                self.refresh_history(cursor, scan_only=True, lookup_error=str(exc))
+                return
+            if checked_active:
+                notice = 'Saved payment statuses updated. Account history update failed: ' + str(exc)
+            elif lookup_error:
+                notice = 'Status check failed: ' + lookup_error + '. Account history update failed: ' + str(exc)
+            else:
+                notice = 'Showing saved payments. Update failed: ' + str(exc)
+            self.history_panel.notice.setText(notice)
             self.history_panel.refresh.setEnabled(True)
             self.history_panel.older.setEnabled(bool(self.history_cursor))
 
