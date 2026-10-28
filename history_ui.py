@@ -66,7 +66,7 @@ class HistoryPanel(QWidget):
                 item = QTableWidgetItem(value)
                 item.setToolTip(value)
                 if column == 3 and record['confirmations']:
-                    item.setToolTip(f"{record['confirmations']} block confirmations reported by your node")
+                    item.setToolTip(f"{record['confirmations']} block confirmations at the last history update")
                 self.table.setItem(row, column, item)
 
     def copy_id(self):

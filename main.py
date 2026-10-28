@@ -29,6 +29,7 @@ from history import fetch_account_page, reconcile_local, LATEST_CURSOR, ACTIVE_S
 from history_ui import HistoryPanel
 from mined_blocks import fetch_mined_page, mined_blocks
 from mined_ui import MinedBlocksPanel
+from explorer_history import HistoryPage, fetch_wallet_page
 from payments_ui import SendPanel, ReceivePanel, address_qr
 from contacts_ui import ContactsPanel
 from bundled_nodes import PUBLIC_NODES, TESTNET_NODES
@@ -356,6 +357,7 @@ class MainWindow(QMainWindow):
         self.mined_cursor = LATEST_CURSOR
         self.mined_details = {}
         self.mined_panel = MinedBlocksPanel(self.list_mined_blocks, self.load_older_mined_blocks)
+        self.mined_panel.block_selected.connect(self.load_mined_header)
         self.mainUI.stackedWidget.removeWidget(self.mainUI.page_5)
         self.mainUI.stackedWidget.insertWidget(6, self.mined_panel)
         self.mainUI.miners_button.setText('My mined blocks')
@@ -417,6 +419,15 @@ class MainWindow(QMainWindow):
             self.jobs.cancel('failover')
         if not self.preferences['auto_lowest_fee']:
             self.jobs.cancel('selection')
+        if previous is not None and previous['explorer_history'] != self.preferences['explorer_history']:
+            self.jobs.cancel('history')
+            self.jobs.cancel('mined')
+            self.jobs.cancel('mined_header')
+            self.history_cursor = self.mined_cursor = LATEST_CURSOR
+            for panel in (self.history_panel, self.mined_panel):
+                panel.refresh.setEnabled(True)
+                panel.older.setEnabled(True)
+                panel.notice.setText('History source changed. Refresh to load the selected source.')
         self.send_panel.fallback_fee = self.preferences['fallback_fee_e8']
         self.send_panel.set_node_fee(self.send_panel.node_minimum)
         if self.isVisible() and address:
@@ -672,6 +683,7 @@ class MainWindow(QMainWindow):
             # An explicit status check takes priority over a slow account scan.
             self.jobs.cancel('history')
         peer, owner, network = PEER, address, db.network
+        use_explorer = self.preferences['explorer_history']
         records = db.history(owner)
         self.history_panel.show_rows(records)
         timestamps = {}
@@ -691,17 +703,26 @@ class MainWindow(QMainWindow):
 
         def work(cancel):
             client = NodeClient(peer, cancel=cancel, deadline=time.monotonic() + 30, network=network)
-            client.require_network()
             if checking:
-                return reconcile_local(client, checking, timestamps), cursor
-            return fetch_account_page(client, owner, cursor, timestamps)
+                client.require_network()
+                return HistoryPage(reconcile_local(client, checking, timestamps), cursor,
+                                   'Updated from your node. Uncertain/not-found payments are never retried automatically.')
+            if use_explorer:
+                return fetch_wallet_page(client, owner, cursor)
+            client.require_network()
+            rows, next_cursor = fetch_account_page(client, owner, cursor, timestamps)
+            return HistoryPage(rows, next_cursor,
+                               'Updated from your node. Uncertain/not-found payments are never retried automatically.')
 
         def success(result):
             if (PEER, address, db.network) != (peer, owner, network):
                 return
-            rows, next_cursor = result
+            rows, next_cursor = result.rows, result.cursor
             try:
-                db.save_history(rows)
+                if result.source == 'explorer':
+                    db.save_explorer_history(rows)
+                else:
+                    db.save_history(rows)
             except (sqlite3.Error, ValueError) as exc:
                 failure(exc)
                 return
@@ -710,7 +731,7 @@ class MainWindow(QMainWindow):
                 self.refresh_history(cursor, scan_only=True, checked_active=True)
                 return
             self.history_cursor = next_cursor
-            notice = 'Updated from your node. Uncertain/not-found payments are never retried automatically.'
+            notice = result.notice
             if lookup_error:
                 notice += ' Direct status check failed: ' + lookup_error
             self.history_panel.notice.setText(notice)
@@ -746,6 +767,7 @@ class MainWindow(QMainWindow):
         if not address or not PEER or self.jobs.running('mined'):
             return
         peer, owner, network = PEER, address, db.network
+        use_explorer = self.preferences['explorer_history']
         known = db.history(owner)
         self.mined_panel.show_blocks(mined_blocks(known, owner, self.mined_details))
         self.mined_panel.notice.setText('Updating rewards and checking recent saved blocks...')
@@ -754,26 +776,37 @@ class MainWindow(QMainWindow):
 
         def work(cancel):
             client = NodeClient(peer, cancel=cancel, deadline=time.monotonic() + 30, network=network)
-            return fetch_mined_page(client, owner, cursor, known)
+            if use_explorer:
+                return fetch_wallet_page(client, owner, cursor, known, rewards=True)
+            rows, next_cursor, details = fetch_mined_page(client, owner, cursor, known)
+            return HistoryPage(rows, next_cursor,
+                               'Rewards paid to this address. Totals cover loaded history; '
+                               'the 100 most recent saved rewards are rechecked. '
+                               + ('Load older to check earlier history.' if next_cursor else 'End of account history reached.'),
+                               details=details)
 
         def success(result):
             if (PEER, address, db.network) != (peer, owner, network):
                 return
-            rows, next_cursor, details = result
+            rows, next_cursor, details = result.rows, result.cursor, result.details
             try:
-                db.save_history(rows)
+                if result.source == 'explorer':
+                    db.save_explorer_history(rows)
+                else:
+                    db.save_history(rows)
             except (sqlite3.Error, ValueError) as exc:
                 failure(exc)
                 return
             self.mined_cursor = next_cursor
             for row in rows:
-                self.mined_details.pop(row['tx_hash'], None)
+                detail = self.mined_details.get(row['tx_hash'])
+                if detail and (not row['confirmations'] or (detail['height'], detail['timestamp']) != (
+                        row['block_height'], row['timestamp'])):
+                    self.mined_details.pop(row['tx_hash'], None)
             self.mined_details.update(details)
             self.mined_panel.show_blocks(mined_blocks(db.history(owner), owner, self.mined_details))
             self.history_panel.show_rows(db.history(owner))
-            self.mined_panel.notice.setText(
-                'Rewards paid to this address. Totals cover loaded history; the 100 most recent saved rewards are rechecked. '
-                + ('Load older to check earlier history.' if next_cursor else 'End of account history reached.'))
+            self.mined_panel.notice.setText(result.notice)
             self.mined_panel.refresh.setEnabled(True)
             self.mined_panel.older.setEnabled(bool(next_cursor))
 
@@ -785,6 +818,45 @@ class MainWindow(QMainWindow):
             self.mined_panel.older.setEnabled(bool(self.mined_cursor))
 
         self.jobs.submit('mined', work, success, failure)
+
+    def load_mined_header(self, block):
+        self.jobs.cancel('mined_header')
+        if not address or not PEER or not self.preferences['explorer_history'] or not block or block['block_hash']:
+            return
+        peer, owner, network = PEER, address, db.network
+        height, timestamp = block['height'], block['timestamp']
+        reward_ids = tuple(block['reward_ids'])
+        self.mined_panel.hash_notice = 'Loading block hash from your node…'
+        self.mined_panel.show_selected()
+
+        def work(cancel):
+            from history import block_timestamp
+            import re
+            client = NodeClient(peer, cancel=cancel, deadline=time.monotonic() + 6, network=network)
+            headers = {}
+            if block_timestamp(client, height, {}, headers) != timestamp:
+                raise NodeError('The node block differs from the saved reward. Refresh mining history.')
+            block_hash = headers[height].get('hash')
+            if not isinstance(block_hash, str) or not re.fullmatch(r'[a-fA-F0-9]{64}', block_hash):
+                raise NodeError('Invalid mining block hash.')
+            return block_hash.lower()
+
+        def success(block_hash):
+            if (PEER, address, db.network) != (peer, owner, network):
+                return
+            for current in self.mined_panel.blocks:
+                if (current['height'], current['timestamp'], tuple(current['reward_ids'])) == (height, timestamp, reward_ids):
+                    current['block_hash'] = block_hash
+                    for tx_hash in reward_ids:
+                        self.mined_details[tx_hash] = dict(height=height, timestamp=timestamp, block_hash=block_hash)
+            self.mined_panel.show_selected()
+
+        def failure(exc):
+            if (PEER, address, db.network) == (peer, owner, network):
+                self.mined_panel.hash_notice = 'Block hash unavailable: ' + str(exc)
+                self.mined_panel.show_selected()
+
+        self.jobs.submit('mined_header', work, success, failure)
 
     def send_wart(self):
         if not PEER or not address:

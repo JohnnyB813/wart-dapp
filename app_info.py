@@ -29,6 +29,11 @@ Build: {BUILD_LABEL}
 Built: {BUILD_INFO['built_at']}
 
 New in {VERSION}
+• Faster transaction and mining history through the WartNode Explorer API, with node fallback.
+• Reward-only pages, block hashes loaded on selection, and explicit index-coverage notices.
+• Explorer history can be disabled in Preferences; saved outgoing-payment checks stay on your node.
+
+In 1.4.5
 • Check saved pending payments before loading the full account history.
 • Keep validated payment statuses when a separate account-history scan times out.
 • Let Check status interrupt a slow history scan; use node-provided payment dates when available.

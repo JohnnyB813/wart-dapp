@@ -1,4 +1,4 @@
-# Warthog Wallet 1.4.5
+# Warthog Wallet 1.4.6
 
 A Windows desktop wallet for Warthog mainnet and native WART payments on the
 DeFi testnet. Private keys and signing stay on this computer.
@@ -22,10 +22,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-windows.ps1
 The script uses `requirements-windows.lock`, records revision/source metadata,
 checks the packaged executable, and creates an executable, ZIP and SHA-256
 manifest in `dist/<version>/`. These paths refer to files created by your local
-build. For version 1.4.5, start your built wallet with:
+build. For version 1.4.6, start your built wallet with:
 
 ```powershell
-.\dist\1.4.5\Start-Wallet.cmd
+.\dist\1.4.6\Start-Wallet.cmd
 ```
 
 Use `Start-Test-Wallet.cmd` in that same folder for a separate, persistent test
@@ -107,6 +107,12 @@ Preferences also control auto-lock (1–60 minutes, default 5) and refresh timin
 (10–300 seconds, default 40). Node order, enabled flags and preferences persist
 across restarts and are included in encrypted backups. Restore keeps preferences
 already saved in the destination profile.
+
+**Use WartNode Explorer for faster transaction and mining history** is enabled
+by default in Preferences. It sends the loaded public address to
+`https://wartnode.com/api/v1/<network>` for read-only indexed history. Disable it
+to use only your connected node for history. Signing, balance checks, fees,
+broadcasts and saved outgoing-payment status checks continue using your node.
 
 ## DeFi testnet
 
@@ -198,16 +204,33 @@ from Address Book and the Send selector. Other saved entries remain available.
 ## Personal history
 
 Transactions lists this wallet's incoming, outgoing and mining payments, with
-UTC dates, amounts, fees, other addresses, IDs and confirmations. Load older
-pages without scanning the whole chain. Saved history remains visible offline.
+UTC dates, amounts, fees, other addresses, IDs and confirmations. WartNode's
+[Explorer API](https://wartnode.com/openapi.json) loads up to 100 indexed actions
+per request, including timestamps, avoiding a separate header request for each
+block. Mainnet and DeFi testnet use separate API namespaces and cursors. Other
+DeFi actions are omitted from this native-payment view. Saved history remains
+visible offline.
+
+The page identifies its source and incomplete index coverage; explorer
+confirmations use the indexed height. Stale, lagging, disabled, malformed or
+unavailable explorer responses fall back to your node. Pagination then restarts
+at the latest node page and merges saved IDs; Load older continues on the node.
+At the end of an incomplete index, Load older also offers node history. A chain
+reset invalidates the explorer cursor and requires Refresh. Requests share a
+rate budget across networks and respect Retry-After without automatic retries.
+Explorer observations cannot change journaled or pending payments or release
+their balance reservations, including across wallet processes.
 
 **My mined blocks** replaces Miners Chain. It shows mining rewards paid to the
 loaded wallet's address, grouped by block, with height, UTC date, reward and
 confirmations. Select a block to see and copy its block hash and select its reward
-transaction ID. Block hashes load from the node during refresh; saved reward
-details remain available offline. Refresh rechecks the 100 most recent saved
-rewards, removing rewards no longer found on the node. Load older follows the
-account-history cursor, including pages with no mining rewards. Counts and reward
+transaction ID. The explorer queries rewards directly; the selected block's hash
+loads from the node on demand and stays available for the current wallet session.
+Refresh verifies saved rewards missing from the latest indexed page's height
+range directly on the node. With explorer history disabled or unavailable,
+refresh rechecks the 100 most recent saved rewards through the node, removing
+rewards no longer found there. Load older follows the active source's cursor,
+including pages with no native mining rewards. Counts and reward
 totals cover loaded history, rather than claiming a lifetime total. An address
 only receives this attribution when the block reward was paid to it; pool payouts
 appear as incoming payments in Transactions.

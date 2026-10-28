@@ -115,6 +115,14 @@ class SettingsPage(QWidget):
                              'You can choose a manual fee for an individual payment on Send.')
         explanation.setWordWrap(True)
         prefs_layout.addWidget(explanation)
+        self.explorer_history = QCheckBox('Use WartNode Explorer for faster transaction and mining history')
+        self.explorer_history.setChecked(preferences['explorer_history'])
+        prefs_layout.addWidget(self.explorer_history)
+        explorer_note = QLabel('Sends the loaded public wallet address to wartnode.com. '
+                              'Disable to load history only from your connected node. '
+                              'Balances and outgoing-payment checks always use your node.')
+        explorer_note.setWordWrap(True)
+        prefs_layout.addWidget(explorer_note)
         preferences_form = QFormLayout()
         self.auto_lock = QSpinBox()
         self.auto_lock.setRange(1, 60)
@@ -182,6 +190,7 @@ class SettingsPage(QWidget):
         self.auto_minfee.setChecked(values['auto_minfee'])
         self.auto_lowest_fee.setChecked(values['auto_lowest_fee'])
         self.auto_failover.setChecked(values['auto_failover'])
+        self.explorer_history.setChecked(values['explorer_history'])
         self.auto_lock.setValue(values['auto_lock_minutes'])
         self.refresh.setValue(values['refresh_seconds'])
         self.fallback_fee.setText(format_e8(values['fallback_fee_e8']))
@@ -266,6 +275,7 @@ class SettingsPage(QWidget):
         try:
             save_preferences(self.store, dict(auto_minfee=self.auto_minfee.isChecked(), auto_failover=self.auto_failover.isChecked(),
                                               auto_lowest_fee=self.auto_lowest_fee.isChecked(),
+                                              explorer_history=self.explorer_history.isChecked(),
                                               auto_lock_minutes=self.auto_lock.value(), refresh_seconds=self.refresh.value(),
                                               fallback_fee_e8=round_fee_e8(parse_e8(self.fallback_fee.text(), allow_zero=True))))
         except (ValueError, sqlite3.Error) as exc:

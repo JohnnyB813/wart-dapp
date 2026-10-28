@@ -121,6 +121,7 @@ class NodeClient:
         if reply.bytesAvailable() and not failures:
             read()
         status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        self.retry_after = bytes(reply.rawHeader('Retry-After')).decode('ascii', errors='ignore')
         error = reply.error()
         if failures:
             raise NodeError(failures[0])

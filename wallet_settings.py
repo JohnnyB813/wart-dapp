@@ -1,13 +1,13 @@
 """Validated, persistent wallet preferences; no signing material."""
 DEFAULTS = dict(auto_minfee=True, auto_failover=True, auto_lowest_fee=True,
-                auto_lock_minutes=5, refresh_seconds=40, fallback_fee_e8=9992)
+                explorer_history=True, auto_lock_minutes=5, refresh_seconds=40, fallback_fee_e8=9992)
 
 
 def validate_preferences(values):
     if not isinstance(values, dict) or set(values) - set(DEFAULTS):
         raise ValueError('Unsupported wallet preferences.')
     values = dict(DEFAULTS, **values)
-    for key in ('auto_minfee', 'auto_failover', 'auto_lowest_fee'):
+    for key in ('auto_minfee', 'auto_failover', 'auto_lowest_fee', 'explorer_history'):
         if type(values[key]) is not bool:
             raise ValueError('Invalid wallet preference.')
     for key, low, high in [('auto_lock_minutes', 1, 60), ('refresh_seconds', 10, 300)]:

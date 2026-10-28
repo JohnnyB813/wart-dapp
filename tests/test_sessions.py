@@ -36,7 +36,7 @@ class SessionTests(unittest.TestCase):
         for name, url, network in main.db.node_profiles():
             if url != 'http://localhost:3000':
                 main.db.save_node_profile(name, url, network, enabled=False)
-        save_preferences(main.db, dict(DEFAULTS, auto_lowest_fee=False, auto_failover=False))
+        save_preferences(main.db, dict(DEFAULTS, auto_lowest_fee=False, auto_failover=False, explorer_history=False))
         token, salt = utils.encrypt_pk(KEY_HEX, 'wallet password')
         main.db.insert_wallet(ADDRESS, token, salt)
         main.address, main.PEER = ADDRESS, 'http://localhost:3000'

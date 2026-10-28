@@ -221,6 +221,24 @@ class DB:
             for row in rows:
                 self._write_history(row)
 
+    def save_explorer_history(self, rows):
+        """Display observations cannot settle journaled or pending payments.
+
+        Check under a write transaction so another wallet process cannot reserve
+        a payment between this check and the history upsert.
+        """
+        from history import ACTIVE_STATUSES, validate_saved_record
+        with self.con:
+            self.con.execute('BEGIN IMMEDIATE')
+            for row in rows:
+                row = validate_saved_record(row)
+                saved = self.con.execute('SELECT payload, status FROM tx_history '
+                                         'WHERE wallet_address=? AND tx_hash=? AND network=?',
+                                         (row['wallet_address'], row['tx_hash'], row['network'])).fetchone()
+                if saved and (saved[0] or saved[1] in ACTIVE_STATUSES):
+                    continue
+                self._write_history(row)
+
     def _write_history(self, row):
         row = dict(row, network=row.get('network', self.network))
         if row['network'] not in ('mainnet', 'testnet'):

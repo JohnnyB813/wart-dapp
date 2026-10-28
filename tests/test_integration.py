@@ -144,7 +144,7 @@ class LocalNodeFlowTests(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         main.db = DB(':memory:')
-        save_preferences(main.db, dict(DEFAULTS, auto_lowest_fee=False, auto_failover=False))
+        save_preferences(main.db, dict(DEFAULTS, auto_lowest_fee=False, auto_failover=False, explorer_history=False))
         main.wallets = main.WartWallets()
         main.mainWindow = main.MainWindow(main.wallets)
         entry = main.WartEntry()
