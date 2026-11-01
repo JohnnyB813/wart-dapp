@@ -1,4 +1,4 @@
-# Warthog Wallet 1.4.8
+# Warthog Wallet 1.4.9
 
 A Windows desktop wallet for Warthog mainnet and native WART payments on the
 DeFi testnet. Private keys and signing stay on this computer.
@@ -38,10 +38,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-windows.ps1
 The script uses `requirements-windows.lock`, records revision/source metadata,
 checks the packaged executable, and creates an executable, ZIP and SHA-256
 manifest in `dist/<version>/`. These paths refer to files created by your local
-build. For version 1.4.8, start your built wallet with:
+build. For version 1.4.9, start your built wallet with:
 
 ```powershell
-.\dist\1.4.8\Start-Wallet.cmd
+.\dist\1.4.9\Start-Wallet.cmd
 ```
 
 Use `Start-Test-Wallet.cmd` in that same folder for a separate, persistent test
@@ -85,6 +85,9 @@ network matches the selected network. Unknown networks cannot authorize payments
 ### 2. Create, add or unlock a wallet
 
 After connecting, the **Wallets** window lists saved addresses. Choose an option:
+
+- **Change node / network**: return to the connection screen while the wallet
+  stays locked, then select a different node or network before unlocking.
 
 - **Create new wallet**: set and confirm a wallet password of at least eight
   characters. Write down the recovery phrase shown afterward and keep it private

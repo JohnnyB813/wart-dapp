@@ -1063,8 +1063,16 @@ class WartWallets(QMainWindow):
         self.wallets.new_wallet_button.clicked.connect(self.new_wallet)
         self.wallets.mnemonic_button.clicked.connect(self.restore_mnemo)
         self.wallets.private_key_button.clicked.connect(self.restore_pk)
+        self.wallets.change_node_button.clicked.connect(self.change_node)
         self.wallets.listWidget.itemClicked.connect(self.open_main_window)
         self.load_wallets()
+
+    def showEvent(self, event):
+        self.wallets.connection.setText(f'{network_label(db.network)} · {PEER}' if PEER else 'No node selected')
+        super().showEvent(event)
+
+    def change_node(self):
+        mainWindow.change_node()
 
     def backup_busy(self, busy):
         self.backup_action.setEnabled(not busy)

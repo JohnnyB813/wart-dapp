@@ -156,6 +156,45 @@ class SessionTests(unittest.TestCase):
             submit.assert_not_called()
         self.assertFalse(self.window.idle_timer.isActive())
 
+    def test_locked_wallets_can_change_node_and_network_before_unlocking(self):
+        entry = main.WartEntry()
+        self.widgets.insert(0, entry)
+        previous = {name: getattr(main, name, None) for name in ('window', 'wallets', 'mainWindow')}
+        main.window, main.wallets, main.mainWindow = entry, self.wallets, self.window
+        try:
+            self.window.lock_wallet()
+            self.assertTrue(self.wallets.isVisible())
+            self.assertIn('Mainnet', self.wallets.wallets.connection.text())
+            self.window.active_confirm = object()
+            self.wallets.wallets.change_node_button.click()
+            self.assertTrue(self.wallets.isVisible())
+            self.assertFalse(entry.isVisible())
+            self.window.active_confirm = None
+            self.wallets.wallets.change_node_button.click()
+            self.assertFalse(self.wallets.isVisible())
+            self.assertTrue(entry.isVisible())
+            self.assertEqual(main.address, '')
+            self.assertEqual(entry.network.currentData(), 'mainnet')
+            self.assertEqual(entry.ui.input_field.text(), main.PEER)
+
+            entry.network.setCurrentIndex(entry.network.findData('testnet'))
+            state = dict(peer='https://testnet.wartnode.com', network='testnet',
+                         height=50, synced=True, version='defi', checked_at=time.time(),
+                         min_fee_e8=100, chain_id='1' * 64, chain_start=200)
+            entry.connected(state)
+            self.assertFalse(entry.isVisible())
+            self.assertTrue(self.wallets.isVisible())
+            self.assertEqual(main.address, '')
+            self.assertEqual(main.db.network, 'testnet')
+            self.assertIn('DeFi testnet', self.wallets.wallets.connection.text())
+            self.assertIn('https://testnet.wartnode.com', self.wallets.wallets.connection.text())
+        finally:
+            for name, value in previous.items():
+                if value is None:
+                    main.__dict__.pop(name, None)
+                else:
+                    setattr(main, name, value)
+
     def test_activity_resets_idle_timeout_then_wallet_locks(self):
         self.window.idle_timer.setInterval(150)
         self.window.show_wallet()

@@ -29,6 +29,10 @@ Build: {BUILD_LABEL}
 Built: {BUILD_INFO['built_at']}
 
 New in {VERSION}
+• Change node or network directly from the locked Wallets page before unlocking an address.
+• Show the selected network and node on the locked Wallets page.
+
+In 1.4.8
 • Detect DeFi testnet resets from the node's first block and archive older testnet transactions and mining rewards.
 • Preserve current-chain history and mainnet history; clear the old balance and restart testnet refresh after a reset.
 • Keep archived reset history in wallet backups and block sends through an older testnet node.
