@@ -38,7 +38,7 @@ from gui_jobs import GuiJobs
 from node_client import NodeClient, NodeError, BroadcastUncertain
 from utils import (TransferIntent, encrypt_pk, format_e8, get_balance,
                    validate_password, wallet_from_pkhex, wallet_from_seed,
-                   unlock_wallet, WalletPasswordError, prepare_tx, parse_e8, round_fee_e8, validate_address)
+                   unlock_wallet_records, WalletPasswordError, prepare_tx, parse_e8, round_fee_e8, validate_address)
 
 mnemo = Mnemonic('english')
 db = None
@@ -103,9 +103,9 @@ class Login(QDialog):
 
     def ok(self):
         global address
-        wallet = db.get_wallet_by_address(self.addr)
+        records = db.get_wallet_records_by_address(self.addr)
         try:
-            addr, key = unlock_wallet(wallet, self.login.textEdit.text())
+            addr, key = unlock_wallet_records(records, self.login.textEdit.text())
             del key
         except WalletPasswordError as exc:
             message(self, exc)
@@ -170,7 +170,7 @@ class Confirm(QDialog):
     def confirm_btn(self):
         if self.sending or self.locked or address != self.addr or db.network != self.network:
             return
-        record = db.get_wallet_by_address(self.addr)
+        records = db.get_wallet_records_by_address(self.addr)
         password = self.password.text()
         self.password.clear()
         self.sending = True
@@ -180,7 +180,7 @@ class Confirm(QDialog):
         intent, peer = self.intent, self.peer
 
         def work(cancel):
-            _, key = unlock_wallet(record, password)
+            _, key = unlock_wallet_records(records, password)
             try:
                 client = NodeClient(peer, cancel=cancel, network=self.network)
                 try:
@@ -215,17 +215,28 @@ class Confirm(QDialog):
             prepared.payload, prepared.tx_hash), self.sent, self.failed)
 
     def sent(self, tx_hash):
-        db.set_tx_status(self.addr, self.tx_hash, 'pending', self.network)
+        notice = 'Transaction accepted.\n' + tx_hash
+        try:
+            db.set_tx_status(self.addr, self.tx_hash, 'pending', self.network)
+        except sqlite3.Error:
+            notice += '\nCould not update the saved status. Check this transaction before sending again.'
         if not self.locked:
-            message(self, 'Transaction accepted.\n' + tx_hash)
+            message(self, notice)
         self.accept()
 
     def failed(self, exc):
         self.sending = False
+        status_error = False
         if self.tx_hash:
-            db.set_tx_status(self.addr, self.tx_hash, 'uncertain' if isinstance(exc, BroadcastUncertain) else 'rejected', self.network)
+            try:
+                db.set_tx_status(self.addr, self.tx_hash, 'uncertain' if isinstance(exc, BroadcastUncertain) else 'rejected', self.network)
+            except sqlite3.Error:
+                status_error = True
         if not self.locked:
-            message(self, exc, 'Broadcast uncertain' if isinstance(exc, BroadcastUncertain) else 'Transaction error')
+            notice = str(exc)
+            if status_error:
+                notice += '\nCould not update the saved status. Check this transaction before sending again.'
+            message(self, notice, 'Broadcast uncertain' if isinstance(exc, BroadcastUncertain) else 'Transaction error')
         if isinstance(exc, WalletPasswordError) and not self.locked:
             self.confirm.ok_btn.setText('Confirm and send')
             self.confirm.ok_btn.setEnabled(True)
@@ -934,9 +945,13 @@ class PrivkeyRestore(QDialog):
         try:
             addr, key = wallet_from_pkhex(self.key.pk_label.text().strip())
             encrypted, salt = encrypt_pk(key.to_string().hex(), self.password)
-            db.insert_wallet(addr, encrypted, salt)
         except (ValueError, TypeError):
             message(self, 'Enter a valid 64-character private key.')
+            return
+        try:
+            db.insert_wallet(addr, encrypted, salt)
+        except ValueError as exc:
+            message(self, exc)
             return
         self.key.pk_label.clear()
         self.password = None
@@ -970,7 +985,11 @@ class MnemoRestore(QDialog):
                 return
         addr, key = wallet_from_seed(mnemo.to_seed(words, passphrase=''))
         encrypted, salt = encrypt_pk(key.to_string().hex(), self.password)
-        db.insert_wallet(addr, encrypted, salt)
+        try:
+            db.insert_wallet(addr, encrypted, salt)
+        except ValueError as exc:
+            message(self, exc)
+            return
         self.addmnemo.pk_label.clear()
         self.password = None
         self.accept()
@@ -1102,7 +1121,12 @@ class WartWallets(QMainWindow):
 
     def load_wallets(self):
         self.wallets.listWidget.clear()
+        seen = set()
         for wallet in db.get_wallets():
+            normalized = wallet[1].lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
             self.wallets.listWidget.addItem(wallet[1])
             self.wallets.listWidget.item(self.wallets.listWidget.count() - 1).setToolTip(wallet[1])
         self.wallets.notice.setText('Select an address to unlock its wallet.' if self.wallets.listWidget.count()
@@ -1143,7 +1167,11 @@ class WartWallets(QMainWindow):
         words = mnemo.generate(strength=256)
         addr, key = wallet_from_seed(mnemo.to_seed(words, passphrase=''))
         encrypted, salt = encrypt_pk(key.to_string().hex(), password)
-        db.insert_wallet(addr, encrypted, salt)
+        try:
+            db.insert_wallet(addr, encrypted, salt)
+        except ValueError as exc:
+            message(self, exc)
+            return
         dialog = Mnemon(words, self)
         dialog.exec()
         dialog.deleteLater()

@@ -29,6 +29,11 @@ Build: {BUILD_LABEL}
 Built: {BUILD_INFO['built_at']}
 
 New in {VERSION}
+• Refresh saved mining rewards when transaction lookups include a timestamp but no block header.
+• Keep the payment review usable when saving a broadcast result fails; check its journaled transaction before retrying.
+• Prevent duplicate wallet imports, including upper/lowercase address variants, while supporting existing duplicate records.
+
+In 1.4.6
 • Faster transaction and mining history through the WartNode Explorer API, with node fallback.
 • Reward-only pages, block hashes loaded on selection, and explicit index-coverage notices.
 • Explorer history can be disabled in Preferences; saved outgoing-payment checks stay on your node.

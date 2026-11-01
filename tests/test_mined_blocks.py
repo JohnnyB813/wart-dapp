@@ -87,6 +87,21 @@ class MinedBlockTests(unittest.TestCase):
         stale = {'ab' * 32: dict(height=49, timestamp=1700000000, block_hash='ef' * 32)}
         self.assertEqual(mined_blocks([saved()], OWNER, stale)[0]['block_hash'], '')
 
+    def test_saved_reward_lookup_with_timestamp_fetches_its_missing_header(self):
+        client = MagicMock(peer=PEER, expected_network='mainnet')
+        client.request.side_effect = [
+            {'fromId': 0, 'perBlock': []},
+            {'header': {'timestamp': 1700000000, 'hash': 'ef' * 32}},
+        ]
+        client.lookup.return_value = dict(reward(), confirmations=2, blockHeight=50,
+                                          timestamp=1700000000)
+        rows, cursor, details = fetch_mined_page(client, OWNER, known=[saved()])
+        self.assertEqual(cursor, 0)
+        self.assertEqual(rows[0]['status'], 'confirmed')
+        self.assertEqual(details['ab' * 32]['block_hash'], 'ef' * 32)
+        self.assertEqual([call.args[0] for call in client.request.call_args_list], [
+            f'/account/{OWNER}/history/{LATEST_CURSOR}', '/chain/block/50/header'])
+
 
 class MinedGuiTests(unittest.TestCase):
     setUp = sessions.SessionTests.setUp

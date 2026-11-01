@@ -1,7 +1,7 @@
 """Address-scoped mining rewards from either network's paginated account API."""
 import re
 
-from history import fetch_account_page, reconcile_local, LATEST_CURSOR
+from history import block_timestamp, fetch_account_page, reconcile_local, LATEST_CURSOR
 from node_client import NodeError
 
 
@@ -21,7 +21,13 @@ def fetch_mined_page(client, owner, before=LATEST_CURSOR, known=()):
     for record in records.values():
         if record['direction'] != 'mined' or not record['block_height'] or not record['confirmations']:
             continue
-        header = headers[record['block_height']]
+        height = record['block_height']
+        if height not in headers:
+            # A lookup can include the block timestamp, so reconcile_local does
+            # not need to fetch its header. We still need the header for its hash.
+            if block_timestamp(client, height, {}, headers) != record['timestamp']:
+                raise NodeError('The node block differs from the saved reward. Refresh mining history.')
+        header = headers[height]
         block_hash = header.get('hash')
         if not isinstance(block_hash, str) or not re.fullmatch(r'[a-fA-F0-9]{64}', block_hash):
             raise NodeError('Invalid block hash in mining reward header.')

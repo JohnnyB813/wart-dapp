@@ -155,6 +155,20 @@ def unlock_wallet(record, password):
         raise WalletPasswordError('Could not unlock this wallet record.') from exc
 
 
+def unlock_wallet_records(records, password):
+    if not records:
+        raise WalletPasswordError('Wallet record is missing.')
+    last_error = None
+    for record in records:
+        try:
+            return unlock_wallet(record, password)
+        except WalletPasswordError as exc:
+            last_error = exc
+    if len(records) == 1:
+        raise last_error
+    raise WalletPasswordError('Invalid wallet password for this address.')
+
+
 def address_from_pk(pk):
     pubkey = pk.get_verifying_key().to_string('compressed')
 

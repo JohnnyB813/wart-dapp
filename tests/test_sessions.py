@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import sqlite3
 import tempfile
 import time
 from threading import Event
@@ -78,6 +79,49 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(main.address, ADDRESS)
         self.assertEqual(login.result(), QDialog.DialogCode.Accepted)
         self.assertIsNone(getattr(main, 'privkey', None))
+
+    def test_legacy_duplicate_address_uses_either_password_and_new_import_is_rejected(self):
+        token, salt = utils.encrypt_pk(KEY_HEX, 'second password')
+        with self.assertRaisesRegex(ValueError, 'already saved'):
+            main.db.insert_wallet(ADDRESS.upper(), token, salt)
+        main.db.con.execute('INSERT INTO wallets(address, pk, salt) VALUES (?, ?, ?)',
+                            (ADDRESS.upper(), token, salt))
+        main.db.con.commit()
+        self.wallets.load_wallets()
+        self.assertEqual(self.wallets.wallets.listWidget.count(), 1)
+        login = main.Login(self.wallets, ADDRESS)
+        self.widgets.insert(0, login)
+        login.login.textEdit.setText('second password')
+        login.ok()
+        self.assertEqual(login.result(), QDialog.DialogCode.Accepted)
+        dialog = self.confirm()
+        prepared = utils.SignedTransfer('ab' * 32, {'signed': 'public data'})
+        with patch.object(main, 'prepare_tx', return_value=prepared), \
+             patch.object(main.NodeClient, 'broadcast', return_value=prepared.tx_hash):
+            dialog.password.setText('second password')
+            dialog.confirm_btn()
+            wait_for(lambda: dialog.result() == QDialog.DialogCode.Accepted)
+
+    def test_status_write_failure_does_not_trap_confirmed_or_uncertain_send(self):
+        prepared = utils.SignedTransfer('ab' * 32, {'signed': 'public data'})
+        dialog = self.confirm()
+        main.db.record_outgoing(ADDRESS, dialog.intent, prepared, main.PEER)
+        dialog.tx_hash = prepared.tx_hash
+        dialog.sending = True
+        with patch.object(main.db, 'set_tx_status', side_effect=sqlite3.OperationalError('disk full')):
+            dialog.sent(prepared.tx_hash)
+        self.assertEqual(dialog.result(), QDialog.DialogCode.Accepted)
+        self.assertEqual(main.db.history(ADDRESS)[0]['status'], 'broadcasting')
+        self.assertIn('Check this transaction', self.notices.call_args.args[1])
+
+        uncertain = self.confirm()
+        uncertain.tx_hash = prepared.tx_hash
+        uncertain.sending = True
+        with patch.object(main.db, 'set_tx_status', side_effect=sqlite3.OperationalError('disk full')):
+            uncertain.failed(main.BroadcastUncertain('Broadcast result is uncertain.'))
+        self.assertEqual(uncertain.result(), QDialog.DialogCode.Rejected)
+        self.assertEqual(main.db.history(ADDRESS)[0]['status'], 'broadcasting')
+        self.assertIn('Check this transaction', self.notices.call_args.args[1])
 
     def test_each_send_requires_password_and_cancel_never_sends(self):
         dialog = self.confirm()

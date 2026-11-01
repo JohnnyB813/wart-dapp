@@ -104,12 +104,18 @@ class DB:
 
     def get_wallet_by_address(self, addr):
         with self.con:
-            r = self.con.execute("SELECT * FROM wallets WHERE address=?", (addr,))
+            r = self.con.execute("SELECT * FROM wallets WHERE address=? COLLATE NOCASE", (addr,))
             data = r.fetchone()
             return data
 
+    def get_wallet_records_by_address(self, addr):
+        return self.con.execute('SELECT * FROM wallets WHERE address=? COLLATE NOCASE ORDER BY id', (addr,)).fetchall()
+
     def insert_wallet(self, addr, pk, salt):
         with self.con:
+            self.con.execute('BEGIN IMMEDIATE')
+            if self.con.execute('SELECT 1 FROM wallets WHERE address=? COLLATE NOCASE', (addr,)).fetchone():
+                raise ValueError('This wallet address is already saved. Unlock the existing wallet instead.')
             self.con.execute("INSERT INTO wallets (address, pk, salt) VALUES (?, ?, ?)", (addr, pk, salt))
 
     def update_balance(self, addr, balance):
@@ -331,7 +337,7 @@ class DB:
         added = 0
         with self.con:
             for address, token, salt in wallets:
-                if not self.con.execute('SELECT 1 FROM wallets WHERE address=?', (address,)).fetchone():
+                if not self.con.execute('SELECT 1 FROM wallets WHERE address=? COLLATE NOCASE', (address,)).fetchone():
                     self.con.execute('INSERT INTO wallets(address, pk, salt) VALUES (?, ?, ?)',
                                      (address, token, salt))
                     added += 1
