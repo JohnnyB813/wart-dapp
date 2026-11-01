@@ -247,6 +247,19 @@ class NodeClient:
             raise NodeError('The node returned an invalid minimum transaction fee.') from exc
         return value
 
+    def testnet_chain_identity(self):
+        """Block one changes when the DeFi testnet starts a fresh chain."""
+        data = self.request('/chain/block/1/header')
+        header = data.get('header')
+        block_hash = header.get('hash') if isinstance(header, dict) else None
+        block_time = header.get('time') if isinstance(header, dict) else None
+        timestamp = block_time.get('timestamp') if isinstance(block_time, dict) else None
+        if (not isinstance(block_hash, str) or not re.fullmatch(r'[a-fA-F0-9]{64}', block_hash)
+                or type(timestamp) is not int or not 0 < timestamp <= 0xffffffff
+                or (data.get('height') is not None and data['height'] != 1)):
+            raise NodeError('The node did not provide a valid DeFi testnet chain identity.')
+        return block_hash.lower(), timestamp
+
     def status(self):
         head = self.head()
         try:
@@ -268,6 +281,15 @@ class NodeClient:
             pass
         state = dict(peer=self.peer, network=network, synced=head.get('synced') is True,
                      height=head['height'], version=version, checked_at=time.time())
+        if self.expected_network == 'testnet' and network == 'testnet' and state['synced'] and state['height']:
+            deadline = self.deadline
+            self.deadline = min(deadline, time.monotonic() + 3)
+            try:
+                state['chain_id'], state['chain_start'] = self.testnet_chain_identity()
+            except NodeError as exc:
+                state['chain_id_error'] = str(exc)
+            finally:
+                self.deadline = deadline
         try:
             state['min_fee_e8'] = self.minimum_fee()
         except NodeError as exc:

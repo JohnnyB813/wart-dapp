@@ -1,6 +1,7 @@
 import sqlite3
 import base64
 import json
+import re
 import time
 from contextlib import closing
 
@@ -54,6 +55,9 @@ class DB:
                     network TEXT NOT NULL DEFAULT 'mainnet', PRIMARY KEY(network, wallet_address, tx_hash))''')
                 self.con.execute("INSERT INTO tx_history SELECT *, 'mainnet' FROM tx_history_legacy")
                 self.con.execute('DROP TABLE tx_history_legacy')
+            self.con.execute('''CREATE TABLE IF NOT EXISTS archived_tx_history AS
+                SELECT tx_history.*, 0 AS archived_at, '' AS old_chain_id
+                FROM tx_history WHERE 0''')
             self.con.execute('''CREATE TABLE IF NOT EXISTS node_profiles (
                 name TEXT PRIMARY KEY, url TEXT NOT NULL, network TEXT NOT NULL DEFAULT 'mainnet')''')
             profile_columns = {row[1] for row in self.con.execute('PRAGMA table_info(node_profiles)')}
@@ -203,6 +207,38 @@ class DB:
             self.con.execute('DELETE FROM data WHERE key=?', (key,))
             self.con.execute('INSERT INTO data(key, value) VALUES (?, ?)', (key, str(value)))
 
+    def observe_testnet_chain(self, height, chain_id, chain_start):
+        """Archive history older than the verified current testnet chain."""
+        if (type(height) is not int or height < 1 or type(chain_start) is not int
+                or not 0 < chain_start <= 0xffffffff or not isinstance(chain_id, str)
+                or not re.fullmatch(r'[a-f0-9]{64}', chain_id)):
+            raise ValueError('Invalid DeFi testnet chain identity.')
+        with self.con:
+            self.con.execute('BEGIN IMMEDIATE')
+            previous = self.setting('testnet_chain_id')
+            changed = previous is not None and previous != chain_id
+            previous_start = self.setting('testnet_chain_start')
+            if changed and previous_start is not None and chain_start < int(previous_start):
+                raise ValueError('This node is on an older DeFi testnet chain. Choose a current testnet node.')
+            # The first observation also cleans old profiles that predate chain
+            # identity tracking. Keep transactions from the current chain.
+            condition = "network='testnet' AND timestamp < ?"
+            values = (chain_start,)
+            if previous != chain_id:
+                condition = "network='testnet' AND (timestamp < ? OR block_height > ?)"
+                values = (chain_start, height + 32)
+            archived = self.con.execute('SELECT COUNT(*) FROM tx_history WHERE ' + condition, values).fetchone()[0]
+            if archived:
+                self.con.execute('INSERT INTO archived_tx_history SELECT tx_history.*, ?, ? '
+                                 'FROM tx_history WHERE ' + condition,
+                                 (int(time.time()), previous or '', *values))
+                self.con.execute('DELETE FROM tx_history WHERE ' + condition, values)
+            if previous != chain_id or previous_start != str(chain_start):
+                for key, value in [('testnet_chain_id', chain_id), ('testnet_chain_start', chain_start)]:
+                    self.con.execute('DELETE FROM data WHERE key=?', (key,))
+                    self.con.execute('INSERT INTO data(key, value) VALUES (?, ?)', (key, str(value)))
+        return changed or bool(archived), archived
+
     def reserved_amount(self, owner, network=None):
         rows = self.con.execute("SELECT amount_e8, fee_e8 FROM tx_history WHERE wallet_address=? "
             "AND network=? AND direction='outgoing' AND status IN ('broadcasting', 'pending', 'uncertain', 'not_found')",
@@ -249,6 +285,12 @@ class DB:
         row = dict(row, network=row.get('network', self.network))
         if row['network'] not in ('mainnet', 'testnet'):
             raise ValueError('Invalid payment network.')
+        if row['network'] == 'testnet':
+            chain_start = self.setting('testnet_chain_start')
+            if chain_start is not None and row['timestamp'] < int(chain_start):
+                if row['payload']:
+                    raise ValueError('The wallet clock predates the current DeFi testnet chain. Nothing was broadcast.')
+                return
         saved = self.con.execute('SELECT amount_e8, fee_e8, counterparty, direction FROM tx_history '
                                  "WHERE wallet_address=? AND tx_hash=? AND network=? AND payload != ''",
                                  (row['wallet_address'], row['tx_hash'], row['network'])).fetchone()
@@ -303,14 +345,24 @@ class DB:
                     if (not isinstance(address, str) or len(address) > 256
                             or not isinstance(name, str) or len(name) > 256):
                         raise ValueError('Invalid contact in backup.')
-                transactions = []
+                transactions, archived_transactions = [], []
+                from history import validate_saved_record
+                source.row_factory = sqlite3.Row
                 if kinds.get('tx_history') == 'table':
-                    from history import validate_saved_record
-                    source.row_factory = sqlite3.Row
                     transactions = [validate_saved_record(dict(row)) for row in
                                     source.execute('SELECT * FROM tx_history LIMIT 50001')]
                     if len(transactions) > 50000:
                         raise ValueError('Backup contains too many payments.')
+                if kinds.get('archived_tx_history') == 'table':
+                    for raw in source.execute('SELECT * FROM archived_tx_history LIMIT 50001'):
+                        row = validate_saved_record(dict(raw))
+                        if (type(row.get('archived_at')) is not int or not 0 <= row['archived_at'] <= 0xffffffff
+                                or not isinstance(row.get('old_chain_id'), str)
+                                or (row['old_chain_id'] and not re.fullmatch(r'[a-f0-9]{64}', row['old_chain_id']))):
+                            raise ValueError('Invalid archived payment in backup.')
+                        archived_transactions.append(row)
+                    if len(archived_transactions) > 50000:
+                        raise ValueError('Backup contains too many archived payments.')
                 profiles = []
                 if kinds.get('node_profiles') == 'table':
                     from node_client import NodeClient
@@ -345,10 +397,24 @@ class DB:
                 self.con.execute('INSERT INTO friends(address, friend) SELECT ?, ? '
                                  'WHERE NOT EXISTS(SELECT 1 FROM friends WHERE address=? AND friend=?)',
                                  (address, name, address, name))
-            if transactions:
+            if transactions or archived_transactions:
                 columns = ('wallet_address', 'tx_hash', 'direction', 'counterparty', 'amount_e8', 'fee_e8',
                            'timestamp', 'status', 'confirmations', 'block_height', 'peer', 'payload', 'network')
+                archive_sql = '''INSERT INTO archived_tx_history
+                    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (
+                        SELECT 1 FROM archived_tx_history WHERE wallet_address=? AND tx_hash=?
+                        AND network=? AND archived_at=?)'''
+                for row in archived_transactions:
+                    archive = tuple(row[key] for key in columns) + (row['archived_at'], row['old_chain_id'])
+                    self.con.execute(archive_sql, archive + (row['wallet_address'], row['tx_hash'],
+                                                              row['network'], row['archived_at']))
+                chain_start = self.setting('testnet_chain_start')
                 for row in transactions:
+                    if row['network'] == 'testnet' and chain_start is not None and row['timestamp'] < int(chain_start):
+                        archive = tuple(row[key] for key in columns) + (int(time.time()), '')
+                        self.con.execute(archive_sql, archive + (row['wallet_address'], row['tx_hash'],
+                                                                  row['network'], archive[-2]))
+                        continue
                     self.con.execute('INSERT OR IGNORE INTO tx_history VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                                      tuple(row[key] for key in columns))
             for name, url, network, enabled, priority in profiles:

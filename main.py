@@ -454,14 +454,43 @@ class MainWindow(QMainWindow):
             self.try_failover()
 
     def set_node_status(self, state):
-        self.node_state = dict(state, online=True)
+        reset, archived, chain_check_error = False, 0, None
+        if (db.network == 'testnet' and state['network'] == 'testnet' and state['synced']
+                and state.get('chain_id')):
+            try:
+                reset, archived = db.observe_testnet_chain(
+                    state['height'], state['chain_id'], state.get('chain_start'))
+            except (sqlite3.Error, ValueError) as exc:
+                chain_check_error = str(exc)
+        if reset:
+            for job in ('balance', 'history', 'mined', 'mined_header', 'selection', 'failover'):
+                self.jobs.cancel(job)
+            if self.active_confirm is not None:
+                self.active_confirm.lock()
+            self.history_cursor = self.mined_cursor = LATEST_CURSOR
+            self.mined_details = {}
+            self.balance_snapshot = None
+            self.mainUI.balance.setText('Loading...')
+            self.send_panel.available.setText('Testnet reset. Refreshing available balance…')
+            self.history_panel.show_rows(db.history(address) if address else [])
+            self.mined_panel.show_blocks(mined_blocks(db.history(address), address) if address else [])
+            self.history_panel.notice.setText('Testnet reset. Older history was archived. Refresh to load the current chain.')
+            self.mined_panel.notice.setText('Testnet reset. Older rewards were archived. Refresh to load the current chain.')
+        self.node_state = dict(state, online=chain_check_error is None, chain_check_error=chain_check_error)
         checked = datetime.fromtimestamp(state['checked_at'], timezone.utc).strftime('%H:%M:%S UTC')
         network = network_label(state['network']) if state['network'] != 'unverified' else 'Network unverified'
         sync = 'Synced' if state['synced'] else 'Synchronizing'
         node_name = state['peer'].split('://', 1)[-1]
         self.statusBar().showMessage(f"Connected | {network} | {sync} | {node_name} | Height {state['height']} | Updated {checked}")
+        if reset:
+            self.statusBar().showMessage(f'Testnet chain changed | Archived {archived} older history records | '
+                                         f'{node_name} | Height {state["height"]}')
+        elif chain_check_error:
+            self.statusBar().showMessage('Testnet history check failed: ' + chain_check_error)
+        elif state.get('chain_id_error') and db.network == 'testnet':
+            self.statusBar().showMessage('Connected | Testnet history identity unavailable | ' + node_name)
         self.statusBar().setToolTip(f"{state['peer']} — node {state['version']}")
-        ready = state['network'] == db.network and state['synced']
+        ready = state['network'] == db.network and state['synced'] and chain_check_error is None
         self.mainUI.send_btn.setEnabled(ready)
         self.mainUI.label_7.setStyleSheet('color: ' + ('#51c76f' if ready else '#e5b953') + ';')
         self.setWindowTitle(f'Warthog Wallet {VERSION} — ' + network_label(db.network))
@@ -470,6 +499,10 @@ class MainWindow(QMainWindow):
         self.settings_panel.active_node.setText('Active node: ' + state['peer'] + ' · ' + network)
         self.settings_panel.record_checks(state.get('node_checks', []) + [state])
         self.send_panel.set_node_fee(state.get('min_fee_e8'), state.get('fee_error', ''))
+        if reset and self.isVisible() and address:
+            self.refresh_balance()
+            self.refresh_history(LATEST_CURSOR)
+            self.refresh_mined_blocks(LATEST_CURSOR)
 
     def refresh_node_status(self):
         if not PEER or self.jobs.running('status') or not (self.isVisible() or self.parent.isVisible()):

@@ -29,6 +29,11 @@ Build: {BUILD_LABEL}
 Built: {BUILD_INFO['built_at']}
 
 New in {VERSION}
+• Detect DeFi testnet resets from the node's first block and archive older testnet transactions and mining rewards.
+• Preserve current-chain history and mainnet history; clear the old balance and restart testnet refresh after a reset.
+• Keep archived reset history in wallet backups and block sends through an older testnet node.
+
+In 1.4.7
 • Refresh saved mining rewards when transaction lookups include a timestamp but no block header.
 • Keep the payment review usable when saving a broadcast result fails; check its journaled transaction before retrying.
 • Prevent duplicate wallet imports, including upper/lowercase address variants, while supporting existing duplicate records.

@@ -1,4 +1,4 @@
-# Warthog Wallet 1.4.7
+# Warthog Wallet 1.4.8
 
 A Windows desktop wallet for Warthog mainnet and native WART payments on the
 DeFi testnet. Private keys and signing stay on this computer.
@@ -38,10 +38,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-windows.ps1
 The script uses `requirements-windows.lock`, records revision/source metadata,
 checks the packaged executable, and creates an executable, ZIP and SHA-256
 manifest in `dist/<version>/`. These paths refer to files created by your local
-build. For version 1.4.7, start your built wallet with:
+build. For version 1.4.8, start your built wallet with:
 
 ```powershell
-.\dist\1.4.7\Start-Wallet.cmd
+.\dist\1.4.8\Start-Wallet.cmd
 ```
 
 Use `Start-Test-Wallet.cmd` in that same folder for a separate, persistent test
@@ -216,6 +216,13 @@ Mainnet and testnet use the same address format and wallet keys, but their balan
 history and pending-payment reservations are separate. Always check the network
 shown on Address and in the payment confirmation. **Change node** locks the wallet
 before switching networks. Testnet coins have no mainnet value.
+
+When a synced testnet node reports a new first-block identity, the wallet archives
+older testnet transactions and mining rewards in its local database, clears the
+previous balance, and reloads history from the current chain. Current-chain and
+mainnet records remain visible. Archived records stay in database backups and do
+not count toward pending-payment reservations. Sending through an older testnet
+chain is blocked until a current node is selected.
 
 The **test profile** is a separate storage profile, independent of the
 network selector. Either storage profile can connect to either network.

@@ -47,6 +47,25 @@ def page(tx=None):
 
 
 class TestnetClientTests(unittest.TestCase):
+    def test_status_reports_testnet_chain_identity(self):
+        client = NodeClient(PEER, network='testnet')
+        head = {'height': 50, 'synced': True}
+        with patch.object(client, 'head', return_value=head), \
+             patch.object(client, 'network', return_value='testnet'), \
+             patch.object(client, 'balance', return_value='0'), \
+             patch.object(client, 'minimum_fee', return_value=FEE), \
+             patch.object(client, 'request', side_effect=lambda path: {
+                 '/tools/info': {'version': {'name': 'DeFi'}},
+                 '/chain/block/1/header': {'height': 1, 'header': HEADER},
+             }[path]):
+            state = client.status()
+        self.assertEqual((state['chain_id'], state['chain_start']),
+                         (HEADER['hash'], HEADER['time']['timestamp']))
+        with patch.object(client, 'request', return_value={'height': 1, 'header': {
+                'hash': 'bad', 'time': {'timestamp': 100}}}):
+            with self.assertRaisesRegex(NodeError, 'chain identity'):
+                client.testnet_chain_identity()
+
     def test_nested_head_balance_and_network_mismatch(self):
         client = NodeClient(PEER, network='testnet')
         head = {'chainHead': {'height': 64, 'pinHeight': 32, 'pinHash': '00' * 32}, 'synced': True}
@@ -138,6 +157,65 @@ class TestnetClientTests(unittest.TestCase):
 
 
 class TestnetStorageTests(unittest.TestCase):
+    def test_reset_archives_old_testnet_rows_but_keeps_current_chain_and_mainnet(self):
+        store = DB(':memory:')
+        try:
+            def row(tx_hash, timestamp, network='testnet', direction='mined', payload='', height=10):
+                return dict(wallet_address=OWNER, tx_hash=tx_hash * 64,
+                            direction=direction, counterparty=OTHER, amount_e8='100',
+                            fee_e8='1', timestamp=timestamp, status='confirmed',
+                            confirmations=1, block_height=height, peer=PEER,
+                            payload=payload, network=network)
+
+            old_mined = row('a', 100)
+            old_payment = row('b', 110, direction='outgoing', payload='{}')
+            current_mined = row('c', 250)
+            mainnet = row('d', 100, network='mainnet')
+            impossible_height = row('e', 250, height=500)
+            store.save_history([old_mined, old_payment, current_mined, mainnet, impossible_height])
+            changed, count = store.observe_testnet_chain(50, '1' * 64, 200)
+            self.assertTrue(changed)
+            self.assertEqual(count, 3)
+            self.assertEqual({r['tx_hash'] for r in store.history(OWNER, 'testnet')}, {current_mined['tx_hash']})
+            self.assertEqual([r['tx_hash'] for r in store.history(OWNER, 'mainnet')], [mainnet['tx_hash']])
+            self.assertEqual(store.con.execute('SELECT COUNT(*) FROM archived_tx_history').fetchone()[0], 3)
+            self.assertEqual(store.observe_testnet_chain(51, '1' * 64, 200), (False, 0))
+            imported = DB(':memory:')
+            try:
+                imported.restore_snapshot(store.snapshot())
+                imported.restore_snapshot(store.snapshot())
+                self.assertEqual(imported.con.execute('SELECT COUNT(*) FROM archived_tx_history').fetchone()[0], 3)
+            finally:
+                imported.con.close()
+            store.save_history([old_mined])
+            self.assertEqual(len(store.history(OWNER, 'testnet')), 1)
+            with self.assertRaisesRegex(ValueError, 'clock predates'):
+                store.save_history([old_payment])
+
+            restored = DB(':memory:')
+            try:
+                restored.observe_testnet_chain(50, '1' * 64, 200)
+                source = DB(':memory:')
+                try:
+                    source.save_history([old_mined, current_mined])
+                    restored.restore_snapshot(source.snapshot())
+                finally:
+                    source.con.close()
+                self.assertEqual([r['tx_hash'] for r in restored.history(OWNER, 'testnet')],
+                                 [current_mined['tx_hash']])
+                self.assertEqual(restored.con.execute('SELECT COUNT(*) FROM archived_tx_history').fetchone()[0], 1)
+            finally:
+                restored.con.close()
+
+            changed, count = store.observe_testnet_chain(60, '2' * 64, 300)
+            self.assertEqual((changed, count), (True, 1))
+            self.assertEqual(store.history(OWNER, 'testnet'), [])
+            with self.assertRaisesRegex(ValueError, 'older DeFi testnet chain'):
+                store.observe_testnet_chain(50, '1' * 64, 200)
+            self.assertEqual(store.setting('testnet_chain_id'), '2' * 64)
+        finally:
+            store.con.close()
+
     def test_networks_keep_same_hash_and_reservations_separate_including_restore(self):
         store, restored = DB(':memory:'), DB(':memory:')
         try:
@@ -187,6 +265,33 @@ class TestnetStorageTests(unittest.TestCase):
 class TestnetSessionGuiTests(unittest.TestCase):
     setUp = sessions.SessionTests.setUp
     tearDown = sessions.SessionTests.tearDown
+
+    def test_reset_clears_cached_profile_and_restarts_history_from_latest(self):
+        main.db.network = 'testnet'
+        base = dict(wallet_address=OWNER, direction='mined', counterparty=OTHER,
+                    amount_e8='100', fee_e8='0', status='confirmed', confirmations=1,
+                    block_height=10, peer=PEER, payload='', network='testnet')
+        main.db.save_history([dict(base, tx_hash='a' * 64, timestamp=100),
+                              dict(base, tx_hash='b' * 64, timestamp=250)])
+        self.window.history_cursor = self.window.mined_cursor = 5
+        self.window.balance_snapshot = (PEER, OWNER, 100, time.monotonic())
+        self.window.mainUI.balance.setText('10.00000000')
+        state = dict(peer=PEER, network='testnet', height=50, synced=True,
+                     version='defi', checked_at=time.time(), min_fee_e8=FEE,
+                     chain_id='1' * 64, chain_start=200)
+        with patch.object(self.window, 'refresh_history') as history_refresh, \
+             patch.object(self.window, 'refresh_mined_blocks') as mined_refresh:
+            self.window.set_node_status(state)
+        self.assertEqual([row['tx_hash'] for row in main.db.history(OWNER)], ['b' * 64])
+        self.assertEqual(self.window.history_cursor, LATEST_CURSOR)
+        self.assertEqual(self.window.mined_cursor, LATEST_CURSOR)
+        self.assertIsNone(self.window.balance_snapshot)
+        self.assertEqual(self.window.mainUI.balance.text(), 'Loading...')
+        self.assertIn('Archived 1', self.window.statusBar().currentMessage())
+        self.assertEqual(self.window.history_panel.table.rowCount(), 1)
+        self.assertEqual(self.window.history_panel.table.item(0, 6).text(), 'b' * 64)
+        history_refresh.assert_not_called()
+        mined_refresh.assert_not_called()
 
     def test_minimum_fee_and_network_mismatch_block_payment_review(self):
         main.db.network = 'testnet'
